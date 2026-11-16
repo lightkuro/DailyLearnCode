@@ -4,7 +4,7 @@ A daily coding-interview practice game that runs/compiles all in the browser. Ea
 
 Keep your code sharp, beat the coderot of vibecode habits.
 
-Solve the coding problems in **Python 3, Java or C++**.
+Solve the coding problems in **Python 3, Java or C++**. (comes with syntax dictionary and crash courses)
 
 Try it: https://learn.kurolight.dev
 
