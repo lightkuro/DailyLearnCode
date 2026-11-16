@@ -1,0 +1,2360 @@
+{
+  "kind": "design",
+  "cases": [
+    {
+      "id": "design-url-shortener",
+      "kind": "design",
+      "type": "lines",
+      "title": "Private links, public list",
+      "briefMd": "A URL shortener: 500M new links a month, 100:1 reads to writes, links never expire, p99 redirect < 50 ms. Many links point to unlisted videos and privately shared docs, so knowing one short link must not help anyone find others.",
+      "tags": [
+        "system design",
+        "security"
+      ],
+      "doc": {
+        "lines": [
+          "API: POST /links takes a long URL and returns a short code; GET /{code} redirects to the long URL.",
+          "App servers: stateless, behind a load balancer, autoscaled on CPU.",
+          "Codes: a counter service hands out sequential ids in blocks of 10,000; a link's code is its id in base62.",
+          "Length: 7 base62 characters cover 3.5 trillion codes, decades of headroom at this rate.",
+          "Storage: a key-value store partitioned by code holds the long URL, the owner and the creation time.",
+          "Replication: each partition has three replicas across availability zones.",
+          "Cache: a Redis cluster holds hot codes with LRU eviction; a miss reads the store and fills the cache.",
+          "Edge: redirects go through a CDN with a short TTL, so popular links rarely reach the app servers.",
+          "Abuse: new long URLs are checked against a malware blocklist before a code is issued.",
+          "Monitoring: alerts on p99 redirect latency, error rate and cache hit rate."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "API: POST /links takes a long URL and returns a short code; GET /{code} redirects to the long URL.",
+          "App servers: stateless, behind a load balancer, autoscaled on CPU.",
+          "Codes: each link gets 7 random base62 characters from a secure RNG; if the code is taken, the insert fails and it retries.",
+          "Length: 7 base62 characters cover 3.5 trillion codes, decades of headroom at this rate.",
+          "Storage: a key-value store partitioned by code holds the long URL, the owner and the creation time.",
+          "Replication: each partition has three replicas across availability zones.",
+          "Cache: a Redis cluster holds hot codes with LRU eviction; a miss reads the store and fills the cache.",
+          "Edge: redirects go through a CDN with a short TTL, so popular links rarely reach the app servers.",
+          "Abuse: new long URLs are checked against a malware blocklist before a code is issued.",
+          "Monitoring: alerts on p99 redirect latency, error rate and cache hit rate."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "Browser",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "cdn",
+            "label": "CDN",
+            "sub": "short-TTL redirects",
+            "kind": "cache",
+            "col": 1
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 2
+          },
+          {
+            "id": "app",
+            "label": "App servers",
+            "sub": "stateless, autoscaled",
+            "kind": "service",
+            "col": 3
+          },
+          {
+            "id": "ctr",
+            "label": "Counter service",
+            "sub": "blocks of 10,000 ids",
+            "kind": "service",
+            "col": 4,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "redis",
+            "label": "Redis",
+            "sub": "hot codes, LRU",
+            "kind": "cache",
+            "col": 4,
+            "row": 1
+          },
+          {
+            "id": "kv",
+            "label": "Key-value store",
+            "sub": "partitioned by code",
+            "kind": "db",
+            "col": 4,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "cdn"
+          },
+          {
+            "from": "cdn",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "app"
+          },
+          {
+            "from": "app",
+            "to": "ctr",
+            "label": "id block"
+          },
+          {
+            "from": "app",
+            "to": "redis"
+          },
+          {
+            "from": "app",
+            "to": "kv"
+          }
+        ]
+      },
+      "explanationMd": "Sequential ids make the codes **enumerable**: take any short link, add one to its code, and you get the next link anyone created. A script can walk through every link ever made, unlisted videos and private docs included, and anyone can read your growth by making two links a day apart and subtracting. Make codes unpredictable: random characters from a secure RNG with a uniqueness check on insert, or the counter run through a keyed permutation (a small block cipher) before encoding."
+    },
+    {
+      "id": "design-rate-limiter",
+      "kind": "design",
+      "type": "choice",
+      "title": "A limit that grows with the fleet",
+      "briefMd": "A public API: each API key may make 100 requests a minute on the free plan and 5,000 on paid plans, and the paid tiers only mean something if the limit holds. Peak traffic is 40k requests/s across 20 API servers.",
+      "tags": [
+        "rate limiting",
+        "load balancing"
+      ],
+      "choices": [
+        "Each server sees only about 1/20 of a key's traffic, so a key gets ~2,000 requests a minute before any 429.",
+        "Caching each key's plan for 60 s means a customer who upgrades waits up to a minute for the higher limit.",
+        "Sending Retry-After tells abusive clients exactly when to come back, which helps them get around the limit.",
+        "Round robin ignores server load; least-connections balancing would stop busy servers from falling behind."
+      ],
+      "answerIndex": 0,
+      "doc": {
+        "lines": [
+          "Edge: clients reach the API through a round-robin load balancer in front of 20 stateless API servers.",
+          "Auth: every request carries an API key; servers cache each key's plan for 60 s.",
+          "Limits: free keys get 100 requests per minute, paid keys 5,000.",
+          "Counting: each API server keeps a sliding-window counter per API key in its own memory.",
+          "Over the limit: the server answers 429 Too Many Requests with a Retry-After header.",
+          "Headers: every response reports the remaining quota in X-RateLimit-Remaining.",
+          "Scaling: the fleet autoscales between 20 and 60 servers on CPU.",
+          "Metrics: 429s are counted per key and shown on the customer's usage dashboard."
+        ],
+        "bad": [
+          4
+        ],
+        "fixed": [
+          "Edge: clients reach the API through a round-robin load balancer in front of 20 stateless API servers.",
+          "Auth: every request carries an API key; servers cache each key's plan for 60 s.",
+          "Limits: free keys get 100 requests per minute, paid keys 5,000.",
+          "Counting: every API server updates one shared sliding-window counter per API key in Redis and checks the total.",
+          "Over the limit: the server answers 429 Too Many Requests with a Retry-After header.",
+          "Headers: every response reports the remaining quota in X-RateLimit-Remaining.",
+          "Scaling: the fleet autoscales between 20 and 60 servers on CPU.",
+          "Metrics: 429s are counted per key and shown on the customer's usage dashboard."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "API clients",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "sub": "round robin",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "a1",
+            "label": "API server 1",
+            "sub": "counters in memory",
+            "kind": "service",
+            "col": 2,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "a2",
+            "label": "API server 2",
+            "sub": "counters in memory",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "a3",
+            "label": "API server 20",
+            "sub": "counters in memory",
+            "kind": "service",
+            "col": 2,
+            "row": 2
+          },
+          {
+            "id": "db",
+            "label": "Postgres",
+            "sub": "API keys and plans",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "dash",
+            "label": "Usage dashboard",
+            "sub": "429s per key",
+            "kind": "service",
+            "col": 3,
+            "row": 1
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "a1"
+          },
+          {
+            "from": "lb",
+            "to": "a2"
+          },
+          {
+            "from": "lb",
+            "to": "a3"
+          },
+          {
+            "from": "a1",
+            "to": "db",
+            "label": "plans",
+            "dashed": true
+          },
+          {
+            "from": "a2",
+            "to": "db",
+            "dashed": true
+          },
+          {
+            "from": "a3",
+            "to": "db",
+            "dashed": true
+          },
+          {
+            "from": "a3",
+            "to": "dash",
+            "label": "429 counts",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "Round robin spreads each key's requests over all 20 servers, so each server's counter sees only about a twentieth of them. A free key can make roughly 2,000 requests a minute before any single server reaches 100, and the real limit grows again when the fleet autoscales to 60. Keep the count in one shared place: a counter or token bucket in Redis that every server updates atomically (`INCR` with an expiry, or a small Lua script)."
+    },
+    {
+      "id": "design-news-feed",
+      "kind": "design",
+      "type": "lines",
+      "title": "One post, eighty million writes",
+      "briefMd": "A social app's home feed: 300M daily users. Most accounts have a few hundred followers, but the biggest have up to 80M. A new post should show up in followers' feeds within a few seconds, and feed reads must be p99 < 200 ms.",
+      "tags": [
+        "system design",
+        "scalability",
+        "message queues"
+      ],
+      "doc": {
+        "lines": [
+          "Posts: stored in a posts table sharded by author id; the API returns once the post is saved.",
+          "Follow graph: a followers table sharded by followee id, so workers can page through an author's followers.",
+          "Fan-out: each new post becomes a queue event; workers push its id into the feed of every follower, whoever the author is.",
+          "Feeds: each user's feed is a Redis list of their latest 800 post ids, trimmed on insert.",
+          "Reads: GET /feed reads the user's list, then loads the post bodies from a post cache in one batch.",
+          "Post cache: post bodies are cached by id with LRU eviction; misses read the posts shards.",
+          "Order: feeds are shown newest first; ranking is out of scope for v1.",
+          "Inactive users: feeds of users away for 30 days are dropped and rebuilt on their next visit.",
+          "Deletes: a deleted post is removed from the posts table; readers skip ids whose post is gone."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Posts: stored in a posts table sharded by author id; the API returns once the post is saved.",
+          "Follow graph: a followers table sharded by followee id, so workers can page through an author's followers.",
+          "Fan-out: each new post becomes a queue event; workers push its id into every follower's feed, unless the author has 100k+ followers.",
+          "Feeds: each user's feed is a Redis list of their latest 800 post ids, trimmed on insert.",
+          "Reads: GET /feed reads the user's list, then loads the post bodies from a post cache in one batch.",
+          "Big accounts: posts by authors with 100k+ followers are merged in at read time from their recent posts.",
+          "Post cache: post bodies are cached by id with LRU eviction; misses read the posts shards.",
+          "Order: feeds are shown newest first; ranking is out of scope for v1.",
+          "Inactive users: feeds of users away for 30 days are dropped and rebuilt on their next visit.",
+          "Deletes: a deleted post is removed from the posts table; readers skip ids whose post is gone."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "App",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "api",
+            "label": "Feed API",
+            "kind": "service",
+            "col": 1
+          },
+          {
+            "id": "posts",
+            "label": "Posts DB",
+            "sub": "sharded by author",
+            "kind": "db",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "q",
+            "label": "Fan-out queue",
+            "kind": "queue",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "fc",
+            "label": "Feed cache",
+            "sub": "Redis list per user",
+            "kind": "cache",
+            "col": 2,
+            "row": 2
+          },
+          {
+            "id": "pc",
+            "label": "Post cache",
+            "sub": "post bodies by id",
+            "kind": "cache",
+            "col": 2,
+            "row": 3
+          },
+          {
+            "id": "fol",
+            "label": "Followers DB",
+            "sub": "sharded by followee",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "w",
+            "label": "Fan-out workers",
+            "kind": "service",
+            "col": 3,
+            "row": 1,
+            "highlight": true
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "api"
+          },
+          {
+            "from": "api",
+            "to": "posts",
+            "label": "new post"
+          },
+          {
+            "from": "api",
+            "to": "q",
+            "label": "post event"
+          },
+          {
+            "from": "api",
+            "to": "fc",
+            "label": "read feed"
+          },
+          {
+            "from": "api",
+            "to": "pc",
+            "label": "bodies"
+          },
+          {
+            "from": "q",
+            "to": "w"
+          },
+          {
+            "from": "w",
+            "to": "fol",
+            "label": "followers"
+          },
+          {
+            "from": "w",
+            "to": "fc",
+            "label": "push post id"
+          }
+        ]
+      },
+      "explanationMd": "Fan-out on write costs one feed insert per follower. That's cheap for a typical account, but one post from an account with 80M followers means 80M Redis writes: the fan-out queue backs up for minutes, and every post queued behind it is late too. Use a **hybrid**: fan out on write for ordinary accounts, and for the few huge ones skip the fan-out and merge their recent posts into the feed when it's read (fan-out on read)."
+    },
+    {
+      "id": "design-chat-routing",
+      "kind": "design",
+      "type": "choice",
+      "title": "Messages stuck on the wrong server",
+      "briefMd": "A chat app with 1:1 and group conversations: 20M users connected at peak over WebSockets, spread across 200 gateway servers. When the recipient is online a message must arrive within a second; history is kept forever.",
+      "tags": [
+        "distributed systems",
+        "networking"
+      ],
+      "choices": [
+        "Cassandra can't keep messages in order inside a partition, so history will come back shuffled.",
+        "Most recipients are on another gateway, so the local lookup misses and they don't get the message live.",
+        "A layer-4 load balancer can't carry WebSocket upgrades, so the connections need a layer-7 balancer.",
+        "Writing to Cassandra before delivering adds a disk write to every message, so delivery can't be real time."
+      ],
+      "answerIndex": 1,
+      "doc": {
+        "lines": [
+          "Connections: each client holds a WebSocket through a layer-4 load balancer to one of 200 gateway servers.",
+          "Each gateway keeps a map from user id to that user's open sockets in its own memory.",
+          "Presence: on connect, the gateway stores user → gateway id in Redis with a 90 s TTL, renewed by heartbeats.",
+          "Sending: a client sends each message over its socket to its own gateway.",
+          "Storage: the gateway writes the message to Cassandra, partitioned by conversation id, in time order.",
+          "Delivery: the gateway then pushes the message to each recipient's sockets found in its local map.",
+          "Offline: recipients with no presence entry in Redis get a push notification instead.",
+          "Reconnects: a client sends its last seen message id and the gateway replays newer ones from Cassandra.",
+          "Deploys: gateways drain their connections slowly so clients reconnect gradually."
+        ],
+        "bad": [
+          6
+        ],
+        "fixed": [
+          "Connections: each client holds a WebSocket through a layer-4 load balancer to one of 200 gateway servers.",
+          "Each gateway keeps a map from user id to that user's open sockets in its own memory.",
+          "Presence: on connect, the gateway stores user → gateway id in Redis with a 90 s TTL, renewed by heartbeats.",
+          "Sending: a client sends each message over its socket to its own gateway.",
+          "Storage: the gateway writes the message to Cassandra, partitioned by conversation id, in time order.",
+          "Delivery: the gateway then looks up each recipient's gateway in Redis and forwards the message there to push.",
+          "Offline: recipients with no presence entry in Redis get a push notification instead.",
+          "Reconnects: a client sends its last seen message id and the gateway replays newer ones from Cassandra.",
+          "Deploys: gateways drain their connections slowly so clients reconnect gradually."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "Clients",
+            "sub": "WebSockets",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "L4 load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "g1",
+            "label": "Gateway 1",
+            "sub": "local socket map",
+            "kind": "service",
+            "col": 2,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "g2",
+            "label": "Gateways 2–200",
+            "sub": "local socket map",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "redis",
+            "label": "Redis",
+            "sub": "presence: user → gateway",
+            "kind": "cache",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "cas",
+            "label": "Cassandra",
+            "sub": "messages by conversation",
+            "kind": "db",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "push",
+            "label": "Push service",
+            "sub": "offline users",
+            "kind": "external",
+            "col": 3,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "lb",
+            "both": true
+          },
+          {
+            "from": "lb",
+            "to": "g1"
+          },
+          {
+            "from": "lb",
+            "to": "g2"
+          },
+          {
+            "from": "g1",
+            "to": "redis"
+          },
+          {
+            "from": "g2",
+            "to": "redis"
+          },
+          {
+            "from": "g1",
+            "to": "cas"
+          },
+          {
+            "from": "g2",
+            "to": "cas"
+          },
+          {
+            "from": "g2",
+            "to": "push",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "With 200 gateways, the recipient is on the sender's gateway only about 1 time in 200. Every other message finds nothing in the local map, and since the recipient does have a presence entry, no push notification goes out either: online users only see the message when they next reconnect. Use the presence registry to **route**: look up the recipient's gateway and forward the message to it (or publish to a per-user or per-gateway pub/sub channel), and let that gateway push it."
+    },
+    {
+      "id": "design-payment-retries",
+      "kind": "design",
+      "type": "lines",
+      "title": "Charged twice for one order",
+      "briefMd": "Checkout for an online store: up to 2,000 orders a minute. The card processor sometimes takes over 10 seconds to answer, and mobile connections drop. A customer must never be charged twice for one order.",
+      "tags": [
+        "idempotency",
+        "distributed systems"
+      ],
+      "doc": {
+        "lines": [
+          "Checkout: the app sends POST /payments with the order id, the amount and a card token from the processor's SDK.",
+          "Payment service: inserts a payment row (status pending), then calls the processor's charge endpoint.",
+          "Retries: the app waits 8 s; on a timeout or dropped connection it sends POST /payments again, up to 3 times.",
+          "Results: the processor's answer moves the payment to succeeded or failed; success marks the order paid.",
+          "Webhooks: the processor's charge events are applied too, in case our call timed out before the answer came.",
+          "Ledger: each succeeded payment writes double-entry ledger rows in the same database transaction.",
+          "Refunds: support staff refund through an admin tool that calls the processor's refund endpoint.",
+          "Reconciliation: a nightly job compares the ledger with the processor's settlement report and flags differences.",
+          "Storage: Postgres with synchronous replication to a standby in another zone."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Checkout: the app sends POST /payments with the order id, the amount and a card token from the processor's SDK.",
+          "Payment service: inserts a payment row (status pending), then calls the processor's charge endpoint.",
+          "Retries: the app makes one idempotency key per checkout and sends it with every attempt; it waits 8 s and retries up to 3 times.",
+          "Dedupe: the key is unique on the payment row; a repeat returns the stored result, and the key is passed to the processor.",
+          "Results: the processor's answer moves the payment to succeeded or failed; success marks the order paid.",
+          "Webhooks: the processor's charge events are applied too, in case our call timed out before the answer came.",
+          "Ledger: each succeeded payment writes double-entry ledger rows in the same database transaction.",
+          "Refunds: support staff refund through an admin tool that calls the processor's refund endpoint.",
+          "Reconciliation: a nightly job compares the ledger with the processor's settlement report and flags differences.",
+          "Storage: Postgres with synchronous replication to a standby in another zone."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "app",
+            "label": "Mobile app",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "gw",
+            "label": "API gateway",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "pay",
+            "label": "Payment service",
+            "kind": "service",
+            "col": 2,
+            "highlight": true
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "payments + ledger",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "proc",
+            "label": "Card processor",
+            "kind": "external",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "recon",
+            "label": "Reconciliation",
+            "sub": "nightly job",
+            "kind": "service",
+            "col": 4
+          }
+        ],
+        "edges": [
+          {
+            "from": "app",
+            "to": "gw",
+            "label": "POST /payments"
+          },
+          {
+            "from": "gw",
+            "to": "pay"
+          },
+          {
+            "from": "pay",
+            "to": "pg"
+          },
+          {
+            "from": "pay",
+            "to": "proc",
+            "label": "charge / webhooks",
+            "both": true
+          },
+          {
+            "from": "recon",
+            "to": "pg",
+            "label": "ledger",
+            "dashed": true
+          },
+          {
+            "from": "recon",
+            "to": "proc",
+            "label": "settlement",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "A timeout doesn't mean the charge failed: the processor may have charged the card and the answer got lost, or is still on its way. Each retry inserts a new payment and sends a new charge, so a slow processor plus a flaky connection bills the customer two or three times. Give each checkout an **idempotency key**, send the same key with every retry, store it with a unique constraint so a repeat returns the first result, and pass it to the processor so it dedupes too."
+    },
+    {
+      "id": "design-cache-stampede",
+      "kind": "design",
+      "type": "choice",
+      "title": "The database falls over every minute",
+      "briefMd": "A news site's home page: 25k requests/s at peak. The story list comes from a query that takes about 2 s, and it may be up to a minute old. Every minute or so, p99 latency spikes and the database replicas hit 100% CPU.",
+      "tags": [
+        "caching",
+        "scalability"
+      ],
+      "choices": [
+        "The 2 s query needs an index on the score column; caching can't help until the query itself is fast.",
+        "Reading from the Redis primary instead of its replica overloads Redis at 25k requests a second.",
+        "When the key expires, thousands of requests miss together and all run the 2 s query on the replicas.",
+        "Rolling deploys of five servers at a time leave too few servers to carry the peak traffic."
+      ],
+      "answerIndex": 2,
+      "doc": {
+        "lines": [
+          "Web: 30 stateless web servers behind a load balancer render the home page.",
+          "Data: the story list comes from one query that joins stories, scores and editor picks (about 2 s).",
+          "Cache: the result is stored in Redis under one key, home:stories, with a fixed 60 s TTL.",
+          "Misses: on a miss, the web server runs the query, writes the result to Redis and renders the page.",
+          "Personal bits: the signed-in user's name and saved stories come from a per-user cache.",
+          "Database: a Postgres primary with two read replicas; the story query runs on a replica.",
+          "Redis: a primary with one replica; web servers read from the primary.",
+          "Deploys: rolling, five web servers at a time."
+        ],
+        "bad": [
+          4
+        ],
+        "fixed": [
+          "Web: 30 stateless web servers behind a load balancer render the home page.",
+          "Data: the story list comes from one query that joins stories, scores and editor picks (about 2 s).",
+          "Cache: the result is stored in Redis under one key, home:stories, with a fixed 60 s TTL.",
+          "Misses: only the server that wins a short Redis lock runs the query; the others keep serving the stale copy.",
+          "Stale copy: each rebuild also writes home:stories:stale with no TTL, so there is always a page to serve.",
+          "Personal bits: the signed-in user's name and saved stories come from a per-user cache.",
+          "Database: a Postgres primary with two read replicas; the story query runs on a replica.",
+          "Redis: a primary with one replica; web servers read from the primary.",
+          "Deploys: rolling, five web servers at a time."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "r",
+            "label": "Readers",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "web",
+            "label": "Web servers ×30",
+            "kind": "service",
+            "col": 2
+          },
+          {
+            "id": "redis",
+            "label": "Redis",
+            "sub": "home:stories, 60 s TTL",
+            "kind": "cache",
+            "col": 3,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "uc",
+            "label": "User cache",
+            "sub": "names, saved stories",
+            "kind": "cache",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "rep",
+            "label": "Postgres replicas",
+            "sub": "run the 2 s query",
+            "kind": "db",
+            "col": 3,
+            "row": 2
+          },
+          {
+            "id": "pri",
+            "label": "Postgres primary",
+            "kind": "db",
+            "col": 4,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "r",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "web"
+          },
+          {
+            "from": "web",
+            "to": "redis"
+          },
+          {
+            "from": "web",
+            "to": "uc"
+          },
+          {
+            "from": "web",
+            "to": "rep",
+            "label": "on a miss"
+          },
+          {
+            "from": "pri",
+            "to": "rep",
+            "label": "replication",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "This is a **cache stampede**: the one hot key expires for every server at the same moment. At 25k requests/s and a 2 s rebuild, tens of thousands of requests miss before the first rebuild lands, and each runs the same expensive query, so the replicas saturate and the rebuild gets even slower. Let one request rebuild (a short lock, or single-flight in each server) while the rest serve the slightly stale copy, or refresh the key in the background before it expires."
+    },
+    {
+      "id": "design-cache-invalidation",
+      "kind": "design",
+      "type": "lines",
+      "title": "The old price comes back",
+      "briefMd": "A product catalog: 2M products, 30k reads/s and a few hundred price changes a minute, read through a Redis cache. After a merchant changes a price, shoppers must see the new price within a few seconds.",
+      "tags": [
+        "caching",
+        "consistency"
+      ],
+      "doc": {
+        "lines": [
+          "Reads: the product service checks Redis first; on a miss it reads Postgres and caches the product for 24 h.",
+          "Writes: merchants change prices through the same product service.",
+          "Update order: the service deletes the product's Redis key, then commits the new price to Postgres.",
+          "Postgres: one primary with a hot standby; cache misses read from the primary.",
+          "Redis: a three-node cluster, keys spread by product id, with LRU eviction.",
+          "Images: served from a CDN; an image gets a new URL whenever it changes.",
+          "Checkout: the order service reads prices from Postgres, never from the cache.",
+          "Monitoring: cache hit rate, Redis memory and p99 read latency are on the service dashboard."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Reads: the product service checks Redis first; on a miss it reads Postgres and caches the product for 24 h.",
+          "Writes: merchants change prices through the same product service.",
+          "Update order: the service commits the new price to Postgres, then deletes the product's Redis key.",
+          "Postgres: one primary with a hot standby; cache misses read from the primary.",
+          "Redis: a three-node cluster, keys spread by product id, with LRU eviction.",
+          "Images: served from a CDN; an image gets a new URL whenever it changes.",
+          "Checkout: the order service reads prices from Postgres, never from the cache.",
+          "Monitoring: cache hit rate, Redis memory and p99 read latency are on the service dashboard."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "shop",
+            "label": "Shoppers",
+            "kind": "client",
+            "col": 0,
+            "row": 0
+          },
+          {
+            "id": "merch",
+            "label": "Merchants",
+            "kind": "client",
+            "col": 0,
+            "row": 1
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "ps",
+            "label": "Product service",
+            "kind": "service",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "os",
+            "label": "Order service",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "redis",
+            "label": "Redis",
+            "sub": "product by id, 24 h TTL",
+            "kind": "cache",
+            "col": 3,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "primary + standby",
+            "kind": "db",
+            "col": 3,
+            "row": 1
+          }
+        ],
+        "edges": [
+          {
+            "from": "shop",
+            "to": "lb"
+          },
+          {
+            "from": "merch",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "ps"
+          },
+          {
+            "from": "lb",
+            "to": "os"
+          },
+          {
+            "from": "ps",
+            "to": "redis",
+            "label": "read / delete"
+          },
+          {
+            "from": "ps",
+            "to": "pg",
+            "label": "miss / update"
+          },
+          {
+            "from": "os",
+            "to": "pg",
+            "label": "checkout prices"
+          }
+        ]
+      },
+      "explanationMd": "Between the delete and the commit, a read misses the cache, reads the **old** price from Postgres and writes it back into Redis, where it stays for 24 hours. A popular product is read every millisecond or so, and a commit takes several, so this happens regularly. Commit first, then delete the key; the much rarer remaining race (a read that started before the commit and writes the cache after the delete) can be closed with a second, delayed delete or a shorter TTL."
+    },
+    {
+      "id": "design-image-upload",
+      "kind": "design",
+      "type": "choice",
+      "title": "Every photo through the app servers",
+      "briefMd": "A photo-sharing app: 5M uploads a day, 8 MB on average and up to 50 MB, many over slow mobile connections. Each photo gets three resized versions and is viewed about 100 times. Feeds must stay fast during upload peaks.",
+      "tags": [
+        "system design",
+        "scalability",
+        "cdn"
+      ],
+      "choices": [
+        "Random object keys scatter each user's photos so widely that the CDN can't cache them well.",
+        "Resizing should happen inside the upload request, so a photo is ready the moment the upload returns.",
+        "Long CDN cache lifetimes mean an edited photo keeps showing its old version for days afterwards.",
+        "Slow uploads stream through the API servers, holding connections and bandwidth that feeds need."
+      ],
+      "answerIndex": 3,
+      "doc": {
+        "lines": [
+          "API servers: 12 instances behind a load balancer serve feeds, comments and uploads.",
+          "Upload: the app POSTs the photo to the API, which streams the bytes on to object storage before replying.",
+          "Keys: originals are stored under a random key; a photo row in Postgres records the key and the owner.",
+          "Resizing: a finished upload puts a job on a queue; workers write three sizes back to object storage.",
+          "Serving: photos are served through a CDN with long cache lifetimes, since a key's bytes never change.",
+          "Metadata: captions, albums and likes live in Postgres; feeds read them through a Redis cache.",
+          "Limits: uploads over 50 MB are rejected; the app shrinks photos before upload when it can.",
+          "Privacy: private photos use signed CDN URLs that expire after an hour."
+        ],
+        "bad": [
+          2
+        ],
+        "fixed": [
+          "API servers: 12 instances behind a load balancer serve feeds, comments and uploads.",
+          "Upload: the API returns a short-lived presigned URL, and the app PUTs the photo straight to object storage.",
+          "Keys: originals are stored under a random key; a photo row in Postgres records the key and the owner.",
+          "Resizing: a finished upload puts a job on a queue; workers write three sizes back to object storage.",
+          "Serving: photos are served through a CDN with long cache lifetimes, since a key's bytes never change.",
+          "Metadata: captions, albums and likes live in Postgres; feeds read them through a Redis cache.",
+          "Limits: uploads over 50 MB are rejected; the app shrinks photos before upload when it can.",
+          "Privacy: private photos use signed CDN URLs that expire after an hour."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "app",
+            "label": "Mobile app",
+            "kind": "client",
+            "col": 0,
+            "row": 0
+          },
+          {
+            "id": "viewers",
+            "label": "Viewers",
+            "kind": "client",
+            "col": 0,
+            "row": 1
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1,
+            "row": 0
+          },
+          {
+            "id": "cdn",
+            "label": "CDN",
+            "sub": "long cache lifetimes",
+            "kind": "cache",
+            "col": 1,
+            "row": 1
+          },
+          {
+            "id": "api",
+            "label": "API servers ×12",
+            "sub": "feeds, comments, uploads",
+            "kind": "service",
+            "col": 2,
+            "highlight": true
+          },
+          {
+            "id": "q",
+            "label": "Resize queue",
+            "kind": "queue",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "photo metadata",
+            "kind": "db",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "bucket",
+            "label": "Object storage",
+            "sub": "originals + sizes",
+            "kind": "db",
+            "col": 3,
+            "row": 2
+          },
+          {
+            "id": "w",
+            "label": "Resize workers",
+            "kind": "service",
+            "col": 4
+          }
+        ],
+        "edges": [
+          {
+            "from": "app",
+            "to": "lb",
+            "label": "upload"
+          },
+          {
+            "from": "lb",
+            "to": "api"
+          },
+          {
+            "from": "api",
+            "to": "q",
+            "label": "resize job"
+          },
+          {
+            "from": "api",
+            "to": "pg"
+          },
+          {
+            "from": "api",
+            "to": "bucket",
+            "label": "photo bytes"
+          },
+          {
+            "from": "q",
+            "to": "w"
+          },
+          {
+            "from": "w",
+            "to": "bucket",
+            "label": "3 sizes"
+          },
+          {
+            "from": "viewers",
+            "to": "cdn"
+          },
+          {
+            "from": "cdn",
+            "to": "bucket",
+            "label": "on a miss"
+          }
+        ]
+      },
+      "explanationMd": "Moving file bytes through the application tier is the bottleneck: 5M photos at 8 MB is about 40 TB a day, and an upload over a slow mobile link holds an API connection (plus memory or a worker) open for a minute or more. Those are the same servers that serve feeds, so upload peaks starve everything else, and scaling them for bandwidth is expensive. Have the API hand out a **presigned URL** and let the app upload straight to object storage (multipart for large files); the API only handles small metadata calls."
+    },
+    {
+      "id": "design-job-scheduler",
+      "kind": "design",
+      "type": "lines",
+      "title": "Two schedulers, two invoices",
+      "briefMd": "Scheduled jobs for a SaaS billing system: about 5,000 a day, such as monthly invoices, card retries and report emails. Jobs must keep running if a machine dies, and a job must never run twice, because customers would be billed twice.",
+      "tags": [
+        "distributed systems",
+        "locks",
+        "reliability"
+      ],
+      "doc": {
+        "lines": [
+          "Jobs: each job is a row in Postgres with a cron expression, a handler name and its next run time.",
+          "Schedulers: two identical scheduler VMs in different zones, so losing a machine doesn't stop jobs.",
+          "Polling: each scheduler reads the jobs table every 10 s and runs every job whose next run time has passed.",
+          "Running: a due job goes to a worker pool on the same VM; handlers call the billing service.",
+          "After a run, the scheduler sets the job's next run time and records the result.",
+          "Retries: a failed run is retried 3 times with exponential backoff, then the on-call is paged.",
+          "Time zones: each job stores its customer's time zone, and the next run time is computed in it.",
+          "History: every run is appended to a job_runs table for audits.",
+          "Deploys: the schedulers are deployed one at a time."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Jobs: each job is a row in Postgres with a cron expression, a handler name and its next run time.",
+          "Schedulers: two identical scheduler VMs in different zones, so losing a machine doesn't stop jobs.",
+          "Polling: every 10 s each scheduler claims due jobs with a conditional update that sets a lease; only the claimer runs a job.",
+          "Running: a due job goes to a worker pool on the same VM; handlers call the billing service.",
+          "After a run, the scheduler sets the job's next run time and records the result.",
+          "Retries: a failed run is retried 3 times with exponential backoff, then the on-call is paged.",
+          "Time zones: each job stores its customer's time zone, and the next run time is computed in it.",
+          "History: every run is appended to a job_runs table for audits.",
+          "Deploys: the schedulers are deployed one at a time."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "jobs, job_runs",
+            "kind": "db",
+            "col": 0,
+            "highlight": true
+          },
+          {
+            "id": "sa",
+            "label": "Scheduler A",
+            "sub": "zone a",
+            "kind": "service",
+            "col": 1,
+            "row": 0
+          },
+          {
+            "id": "sb",
+            "label": "Scheduler B",
+            "sub": "zone b",
+            "kind": "service",
+            "col": 1,
+            "row": 1
+          },
+          {
+            "id": "billing",
+            "label": "Billing service",
+            "kind": "service",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "pager",
+            "label": "On-call pager",
+            "kind": "external",
+            "col": 2,
+            "row": 1
+          }
+        ],
+        "edges": [
+          {
+            "from": "sa",
+            "to": "pg",
+            "label": "poll",
+            "both": true
+          },
+          {
+            "from": "sb",
+            "to": "pg",
+            "label": "poll",
+            "both": true
+          },
+          {
+            "from": "sa",
+            "to": "billing"
+          },
+          {
+            "from": "sb",
+            "to": "billing"
+          },
+          {
+            "from": "sa",
+            "to": "pager",
+            "dashed": true
+          },
+          {
+            "from": "sb",
+            "to": "pager",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "Both schedulers read the same table and see the same due jobs, so most jobs run twice: two invoices, two card charges. Running two copies for availability is right, but they need **mutual exclusion**: claim a job atomically before running it (a conditional `UPDATE ... WHERE lease_until < now()`, or `SELECT ... FOR UPDATE SKIP LOCKED`), with a lease that expires so a crashed scheduler's job is picked up again. Idempotent handlers (one invoice per customer per month) are a good second line of defence."
+    },
+    {
+      "id": "design-leaderboard",
+      "kind": "design",
+      "type": "choice",
+      "title": "Counting 50 million players per view",
+      "briefMd": "A mobile game's global leaderboard: 50M players, 5k score updates/s and 50k leaderboard views/s at peak. Each view shows the top 100 and the player's own rank; a few seconds of lag is fine.",
+      "tags": [
+        "databases",
+        "indexing",
+        "scalability"
+      ],
+      "choices": [
+        "Each rank lookup counts millions of rows, and 50k of those a second is far beyond what the replicas can do.",
+        "Keeping only each player's best score loses the match history that players will want to scroll through.",
+        "Signing scores on game servers doesn't stop cheating; every submission needs a server-side replay.",
+        "A new table each season means lifetime rankings have to union every season's table on each query."
+      ],
+      "answerIndex": 0,
+      "doc": {
+        "lines": [
+          "Scores: when a match ends, the game server sends the player's new score to the leaderboard service.",
+          "Storage: a scores table in Postgres (player id, best score, updated at) with an index on score.",
+          "Writes: an upsert keeps each player's best score.",
+          "Top 100: read from the score index on a read replica, and cached for 2 s.",
+          "My rank: on every view, a read replica counts the players whose score is higher than the player's.",
+          "Replicas: four async read replicas behind a connection pooler.",
+          "Anti-cheat: game servers sign score submissions; unsigned scores are rejected.",
+          "Seasons: a new table each season; old seasons are archived to object storage."
+        ],
+        "bad": [
+          5
+        ],
+        "fixed": [
+          "Scores: when a match ends, the game server sends the player's new score to the leaderboard service.",
+          "Storage: a scores table in Postgres (player id, best score, updated at) with an index on score.",
+          "Writes: an upsert keeps each player's best score.",
+          "Top 100: read from the score index on a read replica, and cached for 2 s.",
+          "My rank: every upsert also updates a Redis sorted set, and a player's rank is one reverse-rank lookup there (O(log n)).",
+          "Replicas: four async read replicas behind a connection pooler.",
+          "Anti-cheat: game servers sign score submissions; unsigned scores are rejected.",
+          "Seasons: a new table each season; old seasons are archived to object storage."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "players",
+            "label": "Players",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "gs",
+            "label": "Game servers",
+            "kind": "service",
+            "col": 1,
+            "row": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1,
+            "row": 1
+          },
+          {
+            "id": "svc",
+            "label": "Leaderboard service",
+            "kind": "service",
+            "col": 2
+          },
+          {
+            "id": "pg",
+            "label": "Postgres primary",
+            "sub": "scores, best per player",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "rep",
+            "label": "Read replicas ×4",
+            "sub": "top 100 and rank queries",
+            "kind": "db",
+            "col": 3,
+            "row": 1,
+            "highlight": true
+          },
+          {
+            "id": "tc",
+            "label": "Top-100 cache",
+            "sub": "2 s TTL",
+            "kind": "cache",
+            "col": 3,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "players",
+            "to": "gs",
+            "label": "matches"
+          },
+          {
+            "from": "players",
+            "to": "lb",
+            "label": "views"
+          },
+          {
+            "from": "gs",
+            "to": "svc",
+            "label": "new score"
+          },
+          {
+            "from": "lb",
+            "to": "svc"
+          },
+          {
+            "from": "svc",
+            "to": "pg",
+            "label": "upsert"
+          },
+          {
+            "from": "svc",
+            "to": "rep",
+            "label": "rank"
+          },
+          {
+            "from": "svc",
+            "to": "tc"
+          },
+          {
+            "from": "pg",
+            "to": "rep",
+            "label": "replication",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "The top 100 is cheap: walk the score index and stop after 100 entries. The rank is not: counting everyone with a higher score touches about 25M index entries for a mid-table player, and doing that 50k times a second is far beyond any set of replicas (and it gets slower as the game grows). Keep scores in a **sorted set** (Redis `ZADD` on each update): `ZREVRANK` gives a rank in O(log n) and `ZREVRANGE 0 99` the top 100, with Postgres as the durable record."
+    },
+    {
+      "id": "design-read-replicas",
+      "kind": "design",
+      "type": "lines",
+      "title": "My new bio disappeared",
+      "briefMd": "A profile service: 50k reads/s and 500 writes/s on Postgres, with one primary and four asynchronous read replicas that are usually 0.1–2 s behind. After users edit their profile, they must always see their own change.",
+      "tags": [
+        "replication",
+        "consistency",
+        "databases"
+      ],
+      "doc": {
+        "lines": [
+          "Writes: profile edits go to the primary through the profile service.",
+          "Reads: every profile read, from any page, goes to a randomly chosen replica.",
+          "Edit flow: after saving, the app goes back to the profile page, which loads the profile again.",
+          "Replication: asynchronous streaming replication; lag is graphed and alerts fire above 30 s.",
+          "Pooling: each service instance uses PgBouncer, with separate pools for the primary and the replicas.",
+          "Failover: if the primary dies, the most up-to-date replica is promoted automatically.",
+          "Search: profile changes reach the search index through a change-data-capture stream.",
+          "Backups: nightly base backups plus continuous WAL archiving to object storage."
+        ],
+        "bad": [
+          2
+        ],
+        "fixed": [
+          "Writes: profile edits go to the primary through the profile service.",
+          "Reads: profile reads go to a random replica, except a user's own profile for 10 s after an edit, which reads the primary.",
+          "Edit flow: after saving, the app goes back to the profile page, which loads the profile again.",
+          "Replication: asynchronous streaming replication; lag is graphed and alerts fire above 30 s.",
+          "Pooling: each service instance uses PgBouncer, with separate pools for the primary and the replicas.",
+          "Failover: if the primary dies, the most up-to-date replica is promoted automatically.",
+          "Search: profile changes reach the search index through a change-data-capture stream.",
+          "Backups: nightly base backups plus continuous WAL archiving to object storage."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "Browser",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "svc",
+            "label": "Profile service",
+            "sub": "PgBouncer pools",
+            "kind": "service",
+            "col": 2
+          },
+          {
+            "id": "pri",
+            "label": "Primary",
+            "sub": "all profile writes",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "r1",
+            "label": "Replica 1",
+            "sub": "async, 0.1–2 s behind",
+            "kind": "db",
+            "col": 3,
+            "row": 1,
+            "highlight": true
+          },
+          {
+            "id": "r2",
+            "label": "Replicas 2–4",
+            "sub": "async",
+            "kind": "db",
+            "col": 3,
+            "row": 2
+          },
+          {
+            "id": "search",
+            "label": "Search index",
+            "sub": "fed by CDC",
+            "kind": "service",
+            "col": 4,
+            "row": 0
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "svc"
+          },
+          {
+            "from": "svc",
+            "to": "pri",
+            "label": "edits"
+          },
+          {
+            "from": "svc",
+            "to": "r1",
+            "label": "reads"
+          },
+          {
+            "from": "svc",
+            "to": "r2",
+            "label": "reads"
+          },
+          {
+            "from": "pri",
+            "to": "r1",
+            "label": "replication",
+            "dashed": true
+          },
+          {
+            "from": "pri",
+            "to": "search",
+            "label": "CDC",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "The profile page loads again a few hundred milliseconds after the save, but the replica it reads from can be up to 2 s behind, so the user sees their old bio and thinks the edit failed (and often edits again). **Read-your-writes** needs routing that knows about the write: send a user's reads of their own data to the primary for a short window after they write (a cookie with the write time works), or wait until the chosen replica has replayed past the write's WAL position. Everyone else can keep reading from replicas."
+    },
+    {
+      "id": "design-notifications",
+      "kind": "design",
+      "type": "choice",
+      "title": "Transfers that wait for the SMS",
+      "briefMd": "A banking app sends email and SMS through third-party providers for sign-ups, logins and transfers. Peak is 3k transfers a minute. The transfer API must stay under 300 ms at p99 and keep working when a provider is slow or down.",
+      "tags": [
+        "message queues",
+        "reliability"
+      ],
+      "choices": [
+        "Debiting and crediting in one transaction locks both accounts, which will deadlock under load.",
+        "A slow or failing provider holds every transfer request open, so the API is only as fast as the provider.",
+        "Rendering templates in 12 languages is too slow to do inside the transfer request itself.",
+        "Keeping notification preferences in the user profile adds a join that slows down every transfer."
+      ],
+      "answerIndex": 1,
+      "doc": {
+        "lines": [
+          "API: transfer requests go through a load balancer to stateless API servers with 200 worker threads each.",
+          "Transfers: the API debits one account and credits the other in a single Postgres transaction.",
+          "Fraud: transfers over the user's limit are held for review instead of being committed.",
+          "Audit: every transfer appends to an audit log table in the same transaction.",
+          "Notify: after the commit, the API calls the email provider, then the SMS provider, and replies once both answer.",
+          "Timeouts: provider calls give up after 10 s.",
+          "Preferences: users choose which events send email, SMS or both; stored with the user profile.",
+          "Templates: messages are rendered from versioned templates, translated into 12 languages."
+        ],
+        "bad": [
+          5
+        ],
+        "fixed": [
+          "API: transfer requests go through a load balancer to stateless API servers with 200 worker threads each.",
+          "Transfers: the API debits one account and credits the other in a single Postgres transaction.",
+          "Fraud: transfers over the user's limit are held for review instead of being committed.",
+          "Audit: every transfer appends to an audit log table in the same transaction.",
+          "Notify: the transaction also inserts a notification job; workers send it to the providers, with retries.",
+          "Timeouts: provider calls give up after 10 s.",
+          "Preferences: users choose which events send email, SMS or both; stored with the user profile.",
+          "Templates: messages are rendered from versioned templates, translated into 12 languages."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "app",
+            "label": "Banking app",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "api",
+            "label": "API servers",
+            "sub": "200 threads each",
+            "kind": "service",
+            "col": 2,
+            "highlight": true
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "accounts, audit log",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "email",
+            "label": "Email provider",
+            "kind": "external",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "sms",
+            "label": "SMS provider",
+            "kind": "external",
+            "col": 3,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "app",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "api"
+          },
+          {
+            "from": "api",
+            "to": "pg",
+            "label": "transaction"
+          },
+          {
+            "from": "api",
+            "to": "email",
+            "label": "sync call"
+          },
+          {
+            "from": "api",
+            "to": "sms",
+            "label": "sync call"
+          }
+        ]
+      },
+      "explanationMd": "The transfer is done once it commits, but the request keeps waiting on two outside companies. If the SMS provider slows to 10 s, every transfer takes 10 s, the 200 threads per server fill up and the API starts failing, and a client that times out may retry a transfer that already went through. Record a notification job in the same transaction (an **outbox**) or put a message on a queue, reply right away, and let workers send it with retries and backoff."
+    },
+    {
+      "id": "design-webhooks",
+      "kind": "design",
+      "type": "lines",
+      "title": "Webhooks, fired and forgotten",
+      "briefMd": "A payments platform sends webhooks (payment succeeded, refund created, …) to 20k merchant endpoints, about 2M events a day. Merchants ship goods when they get a payment event, so every event must reach them, and they must be able to trust that it came from us.",
+      "tags": [
+        "api design",
+        "security",
+        "reliability"
+      ],
+      "doc": {
+        "lines": [
+          "Events: each payment state change writes an event row in the same transaction as the change.",
+          "Dispatch: a dispatcher reads new events and queues one delivery job per subscribed endpoint.",
+          "Delivery: a worker POSTs the event JSON to the merchant's HTTPS URL with a 10 s timeout.",
+          "Failures: on a timeout or a non-2xx answer, the worker logs the error and drops the delivery.",
+          "Ordering: each event has an id and a per-object sequence number, so merchants can skip duplicates and stale updates.",
+          "Auth: requests carry only the event JSON; merchants know it's us because their webhook URL is secret.",
+          "Isolation: each merchant has its own concurrency limit, so one slow endpoint can't stall the workers.",
+          "Dashboard: merchants can see every event from the last 30 days and its delivery attempts."
+        ],
+        "bad": [
+          4,
+          6
+        ],
+        "fixed": [
+          "Events: each payment state change writes an event row in the same transaction as the change.",
+          "Dispatch: a dispatcher reads new events and queues one delivery job per subscribed endpoint.",
+          "Delivery: a worker POSTs the event JSON to the merchant's HTTPS URL with a 10 s timeout.",
+          "Failures: a timeout or non-2xx answer is retried with exponential backoff and jitter for up to 3 days, then flagged.",
+          "Ordering: each event has an id and a per-object sequence number, so merchants can skip duplicates and stale updates.",
+          "Auth: each request carries a timestamp and an HMAC-SHA256 signature of the body made with a per-merchant secret.",
+          "Isolation: each merchant has its own concurrency limit, so one slow endpoint can't stall the workers.",
+          "Dashboard: merchants can see every event from the last 30 days and its delivery attempts."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "api",
+            "label": "Payments API",
+            "kind": "service",
+            "col": 0,
+            "row": 0
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "state + events",
+            "kind": "db",
+            "col": 0,
+            "row": 1
+          },
+          {
+            "id": "disp",
+            "label": "Dispatcher",
+            "kind": "service",
+            "col": 1
+          },
+          {
+            "id": "q",
+            "label": "Delivery queue",
+            "kind": "queue",
+            "col": 2
+          },
+          {
+            "id": "w",
+            "label": "Webhook workers",
+            "kind": "service",
+            "col": 3,
+            "highlight": true
+          },
+          {
+            "id": "m",
+            "label": "Merchant endpoints",
+            "sub": "20k HTTPS URLs",
+            "kind": "external",
+            "col": 4
+          }
+        ],
+        "edges": [
+          {
+            "from": "api",
+            "to": "pg",
+            "label": "same transaction"
+          },
+          {
+            "from": "pg",
+            "to": "disp",
+            "label": "new events"
+          },
+          {
+            "from": "disp",
+            "to": "q"
+          },
+          {
+            "from": "q",
+            "to": "w"
+          },
+          {
+            "from": "w",
+            "to": "m",
+            "label": "POST event"
+          }
+        ]
+      },
+      "explanationMd": "Two decisions break the guarantees. Merchant endpoints go down, deploy and time out all the time, and dropping a failed delivery means the merchant never hears that an order was paid: retry with **exponential backoff and jitter** for days (delivery becomes at-least-once, which the event ids already handle). And a secret URL isn't authentication: URLs end up in logs, configs and support tickets, and anyone who has one can post a fake payment event. **Sign** each request (an HMAC of the timestamp and body with a per-merchant secret) so merchants can verify it and reject old replays."
+    },
+    {
+      "id": "design-country-shards",
+      "kind": "design",
+      "type": "choice",
+      "title": "One shard carries half the trips",
+      "briefMd": "A ride-hailing trips database: 40M trips a day in 60 countries, and the US alone is about 45% of them. Trips grow 3x a year, and the database must keep scaling by adding nodes. EU riders' trips must stay in EU regions.",
+      "tags": [
+        "sharding",
+        "databases"
+      ],
+      "choices": [
+        "Streaming changes out with change data capture slows down every write on the shard primaries.",
+        "Postgres can't absorb 40M new rows a day, so trips belong in a wide-column store like Cassandra.",
+        "Country is a skewed key: the US shard takes ~45% of all writes, and one country can't be split further.",
+        "Keeping a route summary in each trip row makes rows too large for Postgres to index efficiently."
+      ],
+      "answerIndex": 2,
+      "doc": {
+        "lines": [
+          "Trips: each row holds rider, driver, city, country, timestamps, fare and a route summary.",
+          "Sharding: trips are sharded by country code; a lookup table maps each country to one of 16 Postgres shards.",
+          "Replicas: each shard has a primary and two replicas in the region of its countries.",
+          "Reads: riders and drivers mostly fetch their own recent trips by trip id or user id.",
+          "IDs: trip ids are 64-bit and time-ordered, with the shard number embedded.",
+          "Analytics: trips stream into the data warehouse through change data capture.",
+          "Compliance: countries in the EU map only to shards in EU regions.",
+          "Resharding: moving a country to another shard is a planned migration."
+        ],
+        "bad": [
+          2
+        ],
+        "fixed": [
+          "Trips: each row holds rider, driver, city, country, timestamps, fare and a route summary.",
+          "Sharding: trips are placed by region for data residency, then by a hash of rider id across that region's shards.",
+          "Replicas: each shard has a primary and two replicas in the region of its countries.",
+          "Reads: riders and drivers mostly fetch their own recent trips by trip id or user id.",
+          "IDs: trip ids are 64-bit and time-ordered, with the shard number embedded.",
+          "Analytics: trips stream into the data warehouse through change data capture.",
+          "Compliance: countries in the EU map only to shards in EU regions.",
+          "Resharding: moving a country to another shard is a planned migration."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "rider",
+            "label": "Rider app",
+            "kind": "client",
+            "col": 0,
+            "row": 0
+          },
+          {
+            "id": "driver",
+            "label": "Driver app",
+            "kind": "client",
+            "col": 0,
+            "row": 1
+          },
+          {
+            "id": "api",
+            "label": "Trip service",
+            "kind": "service",
+            "col": 1
+          },
+          {
+            "id": "router",
+            "label": "Shard router",
+            "sub": "country → shard",
+            "kind": "service",
+            "col": 2
+          },
+          {
+            "id": "us",
+            "label": "Shard 1",
+            "sub": "US",
+            "kind": "db",
+            "col": 3,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "eu",
+            "label": "Shard 2",
+            "sub": "DE, FR, ES",
+            "kind": "db",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "rest",
+            "label": "Shards 3–16",
+            "sub": "other countries",
+            "kind": "db",
+            "col": 3,
+            "row": 2
+          },
+          {
+            "id": "wh",
+            "label": "Data warehouse",
+            "kind": "external",
+            "col": 4
+          }
+        ],
+        "edges": [
+          {
+            "from": "rider",
+            "to": "api"
+          },
+          {
+            "from": "driver",
+            "to": "api"
+          },
+          {
+            "from": "api",
+            "to": "router"
+          },
+          {
+            "from": "router",
+            "to": "us"
+          },
+          {
+            "from": "router",
+            "to": "eu"
+          },
+          {
+            "from": "router",
+            "to": "rest"
+          },
+          {
+            "from": "us",
+            "to": "wh",
+            "dashed": true
+          },
+          {
+            "from": "eu",
+            "to": "wh",
+            "label": "CDC",
+            "dashed": true
+          },
+          {
+            "from": "rest",
+            "to": "wh",
+            "dashed": true
+          }
+        ]
+      },
+      "explanationMd": "Country is a **low-cardinality, skewed shard key**. The US shard takes about 45% of all writes while most of the other 15 sit nearly idle, and because one country can't be split across shards, adding nodes doesn't help: that shard can only move to bigger hardware, and at 3x growth a year it soon runs out. Keep the region for data residency, but within a region spread trips by a hash of a high-cardinality key such as rider id."
+    },
+    {
+      "id": "design-outbox",
+      "kind": "design",
+      "type": "lines",
+      "title": "Orders the warehouse never hears about",
+      "briefMd": "An e-commerce order service: about 1,000 orders a minute. Every saved order must reach the warehouse, email and analytics services through Kafka, and no event may go out for an order that wasn't saved.",
+      "tags": [
+        "message queues",
+        "transactions",
+        "distributed systems"
+      ],
+      "doc": {
+        "lines": [
+          "API: POST /orders validates the cart and checks prices against the catalog.",
+          "Storage: the order and its line items are inserted into Postgres in one transaction.",
+          "Events: right after the commit, the service publishes OrderPlaced to Kafka, retrying up to 5 times on errors.",
+          "Kafka: topic orders, partitioned by order id, replication factor 3, producers wait for all in-sync replicas.",
+          "Consumers: the warehouse, email and analytics services each read the topic in their own consumer group.",
+          "Dedupe: consumers ignore an order id they've already handled, since delivery is at least once.",
+          "Deploys: rolling; order-service pods are killed 30 s after they're asked to stop.",
+          "Monitoring: consumer lag is graphed per group, with an alert above 5 minutes."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "API: POST /orders validates the cart and checks prices against the catalog.",
+          "Storage: the order and its line items are inserted into Postgres in one transaction.",
+          "Events: the same transaction inserts OrderPlaced into an outbox table; a relay publishes outbox rows to Kafka.",
+          "Relay: marks a row sent once Kafka acknowledges it; after a crash it simply publishes the row again.",
+          "Kafka: topic orders, partitioned by order id, replication factor 3, producers wait for all in-sync replicas.",
+          "Consumers: the warehouse, email and analytics services each read the topic in their own consumer group.",
+          "Dedupe: consumers ignore an order id they've already handled, since delivery is at least once.",
+          "Deploys: rolling; order-service pods are killed 30 s after they're asked to stop.",
+          "Monitoring: consumer lag is graphed per group, with an alert above 5 minutes."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "c",
+            "label": "Shop frontend",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "os",
+            "label": "Order service",
+            "kind": "service",
+            "col": 1,
+            "highlight": true
+          },
+          {
+            "id": "pg",
+            "label": "Postgres",
+            "sub": "orders, line items",
+            "kind": "db",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "k",
+            "label": "Kafka",
+            "sub": "topic: orders",
+            "kind": "queue",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "wh",
+            "label": "Warehouse service",
+            "kind": "service",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "em",
+            "label": "Email service",
+            "kind": "service",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "an",
+            "label": "Analytics service",
+            "kind": "service",
+            "col": 3,
+            "row": 2
+          }
+        ],
+        "edges": [
+          {
+            "from": "c",
+            "to": "os",
+            "label": "POST /orders"
+          },
+          {
+            "from": "os",
+            "to": "pg",
+            "label": "commit"
+          },
+          {
+            "from": "os",
+            "to": "k",
+            "label": "then publish"
+          },
+          {
+            "from": "k",
+            "to": "wh"
+          },
+          {
+            "from": "k",
+            "to": "em"
+          },
+          {
+            "from": "k",
+            "to": "an"
+          }
+        ]
+      },
+      "explanationMd": "This is a **dual write**: the database commit and the Kafka publish can't succeed or fail together. If the pod dies between them (a deploy, an OOM kill) or Kafka is unreachable for longer than the retries, the order exists but no other service ever hears about it; publishing first instead would announce orders that then fail to save. Use a **transactional outbox**: write the event to an outbox table in the same transaction as the order and let a relay (or change data capture) publish it. Consumers already dedupe, so a second publish after a crash is harmless."
+    },
+    {
+      "id": "design-multi-region",
+      "kind": "design",
+      "type": "choice",
+      "title": "Two regions, one balance",
+      "briefMd": "A digital wallet with 10M users runs active-active in us-east and eu-west, so either region can serve everyone if the other fails. A region outage may delay recent transactions until it recovers, but a balance must never go below zero, and money must never be created or lost.",
+      "tags": [
+        "consistency",
+        "replication",
+        "distributed systems"
+      ],
+      "choices": [
+        "Latency-based DNS can send some users to the farther region, adding about 80 ms to their payments.",
+        "NTP skew of up to 50 ms means ledger entries from the two regions may be stored slightly out of order.",
+        "Appending a ledger entry for every change doubles the writes per payment and halves each region's throughput.",
+        "Both regions can change the same balance at once, and last-write-wins silently throws one change away."
+      ],
+      "answerIndex": 3,
+      "doc": {
+        "lines": [
+          "Routing: latency-based DNS sends users to the nearest region; either region accepts any request.",
+          "Accounts: each account row holds the current balance and an updated_at timestamp.",
+          "Replication: the regions replicate to each other asynchronously, usually within a second.",
+          "Conflicts: when both regions changed the same row, the version with the later updated_at wins.",
+          "Payments: a payment checks the balance in the local region and writes the new balance there.",
+          "Ledger: every change also appends an entry to a ledger table, replicated the same way.",
+          "Failover: if a region fails health checks, DNS sends all its users to the other region.",
+          "Clocks: servers sync with NTP, and skew over 50 ms raises an alert."
+        ],
+        "bad": [
+          4,
+          5
+        ],
+        "fixed": [
+          "Routing: latency-based DNS sends users to the nearest region; either region accepts any request.",
+          "Accounts: each account row holds the current balance and an updated_at timestamp.",
+          "Replication: the regions replicate to each other asynchronously, usually within a second.",
+          "Conflicts: balances never conflict, because each account's balance is written in one region only.",
+          "Payments: go to the account's home region, which checks and writes the balance; the other region forwards them.",
+          "Ledger: every change also appends an entry to a ledger table, replicated the same way.",
+          "Failover: if a region fails health checks, DNS sends all its users to the other region.",
+          "Clocks: servers sync with NTP, and skew over 50 ms raises an alert."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "u",
+            "label": "Users",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "dns",
+            "label": "Latency DNS",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "ea",
+            "label": "App: us-east",
+            "kind": "service",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "eu",
+            "label": "App: eu-west",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "dbe",
+            "label": "DB: us-east",
+            "sub": "balances, ledger",
+            "kind": "db",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "dbw",
+            "label": "DB: eu-west",
+            "sub": "balances, ledger",
+            "kind": "db",
+            "col": 3,
+            "row": 1
+          },
+          {
+            "id": "rep",
+            "label": "Async replication",
+            "sub": "last write wins",
+            "kind": "queue",
+            "col": 4,
+            "highlight": true
+          }
+        ],
+        "edges": [
+          {
+            "from": "u",
+            "to": "dns"
+          },
+          {
+            "from": "dns",
+            "to": "ea"
+          },
+          {
+            "from": "dns",
+            "to": "eu"
+          },
+          {
+            "from": "ea",
+            "to": "dbe"
+          },
+          {
+            "from": "eu",
+            "to": "dbw"
+          },
+          {
+            "from": "dbe",
+            "to": "rep",
+            "both": true
+          },
+          {
+            "from": "dbw",
+            "to": "rep",
+            "both": true
+          }
+        ]
+      },
+      "explanationMd": "Async active-active lets both regions change the same row at once: a transfer handled in us-east credits Bob while Bob pays in eu-west, or two payments race after a DNS flip. Each region checks its own copy of the balance, so both can spend the same $100, and when the rows meet, **last-write-wins** keeps one version and silently drops the other change, creating or destroying money. Give each account a **home region** that alone writes its balance, with the other region forwarding to it (and a fenced handover on failover), or keep balances in a store that coordinates writes across regions."
+    },
+    {
+      "id": "design-autocomplete",
+      "kind": "design",
+      "type": "lines",
+      "title": "Search-as-you-type on the primary",
+      "briefMd": "Search autocomplete for a marketplace: 50M product titles, about 20k keystroke queries a second at peak. Suggestions must appear within 100 ms and may be a few minutes out of date. The same Postgres primary handles every order and checkout.",
+      "tags": [
+        "databases",
+        "indexing",
+        "performance"
+      ],
+      "doc": {
+        "lines": [
+          "Client: the search box asks for suggestions 150 ms after the user stops typing, once 2+ characters are typed.",
+          "API: GET /suggest?q= on a search service behind the site's load balancer.",
+          "Query: each request finds titles containing q anywhere (case-insensitive) with a pattern match on the primary.",
+          "Ranking: matches are ordered by 30-day sales, and the top 10 are returned.",
+          "Caching: results for each query string are cached in Redis for 10 minutes.",
+          "Typos: no fuzzy matching in v1.",
+          "Freshness: new products appear in suggestions once the cached results for their queries expire.",
+          "Limits: queries longer than 50 characters are cut off."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Client: the search box asks for suggestions 150 ms after the user stops typing, once 2+ characters are typed.",
+          "API: GET /suggest?q= on a search service behind the site's load balancer.",
+          "Query: suggestions come from a search cluster with an n-gram index on titles, fed from Postgres by change data capture.",
+          "Ranking: matches are ordered by 30-day sales, and the top 10 are returned.",
+          "Caching: results for each query string are cached in Redis for 10 minutes.",
+          "Typos: no fuzzy matching in v1.",
+          "Freshness: new products appear in suggestions once the cached results for their queries expire.",
+          "Limits: queries longer than 50 characters are cut off."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "b",
+            "label": "Browser",
+            "sub": "search box",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "ss",
+            "label": "Search service",
+            "kind": "service",
+            "col": 2,
+            "row": 0
+          },
+          {
+            "id": "co",
+            "label": "Checkout service",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "redis",
+            "label": "Redis",
+            "sub": "results per query, 10 min",
+            "kind": "cache",
+            "col": 3,
+            "row": 0
+          },
+          {
+            "id": "pg",
+            "label": "Postgres primary",
+            "sub": "products, orders",
+            "kind": "db",
+            "col": 3,
+            "row": 1,
+            "highlight": true
+          }
+        ],
+        "edges": [
+          {
+            "from": "b",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "ss",
+            "label": "GET /suggest"
+          },
+          {
+            "from": "lb",
+            "to": "co"
+          },
+          {
+            "from": "ss",
+            "to": "redis"
+          },
+          {
+            "from": "ss",
+            "to": "pg",
+            "label": "title contains q"
+          },
+          {
+            "from": "co",
+            "to": "pg",
+            "label": "orders"
+          }
+        ]
+      },
+      "explanationMd": "A contains-match with a leading wildcard (`ILIKE '%q%'`) can't use an ordinary B-tree index, so every uncached keystroke scans and sorts up to 50M titles. The cache only helps popular strings; the long tail of distinct queries still sends thousands of full scans a second to the same primary that takes orders, so checkouts slow down along with search. Serve suggestions from a purpose-built index (a search engine with n-gram analysis, or precomputed top-10 lists per prefix) kept up to date from the database by change data capture."
+    },
+    {
+      "id": "design-metrics-backpressure",
+      "kind": "design",
+      "type": "choice",
+      "title": "The collectors that ate their memory",
+      "briefMd": "A metrics pipeline: 3,000 hosts send about 2M data points a second to a fleet of collectors, which write them to a time-series database. Losing some points during an incident is acceptable; losing the collectors is not, because alerting reads the same data.",
+      "tags": [
+        "reliability",
+        "observability"
+      ],
+      "choices": [
+        "Sharding the time-series database by series puts each popular metric on one hot node.",
+        "Agents should send every point as soon as it's measured, since 10 s batches make dashboards lag.",
+        "When the database slows down, the queues grow without limit until collectors run out of memory and die.",
+        "Thirty days of retention is too short; capacity planning needs at least a year of history."
+      ],
+      "answerIndex": 2,
+      "doc": {
+        "lines": [
+          "Agents: each host batches its metrics every 10 s and POSTs them to the collectors through a load balancer.",
+          "Collectors: 20 stateless instances that parse, tag and forward batches to the time-series database.",
+          "Buffering: each collector appends incoming points to an in-memory queue with no size limit and answers 202 right away.",
+          "Writers: a thread pool in each collector drains the queue, writing 10k points per database request.",
+          "TSDB: a clustered time-series database, sharded by series, keeping 30 days of data.",
+          "Agent retries: a failed POST is retried 3 times with backoff, then the batch is dropped.",
+          "Scaling: collectors autoscale on CPU usage.",
+          "Alerting: the alert evaluator queries the time-series database every 30 s."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Agents: each host batches its metrics every 10 s and POSTs them to the collectors through a load balancer.",
+          "Collectors: 20 stateless instances that parse, tag and forward batches to the time-series database.",
+          "Buffering: each collector has a bounded queue (1M points); when it's full it answers 503 and the agent backs off.",
+          "Writers: a thread pool in each collector drains the queue, writing 10k points per database request.",
+          "TSDB: a clustered time-series database, sharded by series, keeping 30 days of data.",
+          "Agent retries: a failed POST is retried 3 times with backoff, then the batch is dropped.",
+          "Scaling: collectors autoscale on CPU usage.",
+          "Alerting: the alert evaluator queries the time-series database every 30 s."
+        ]
+      },
+      "diagram": {
+        "type": "flow",
+        "nodes": [
+          {
+            "id": "h",
+            "label": "Hosts ×3,000",
+            "sub": "agents, 10 s batches",
+            "kind": "client",
+            "col": 0
+          },
+          {
+            "id": "lb",
+            "label": "Load balancer",
+            "kind": "lb",
+            "col": 1
+          },
+          {
+            "id": "c1",
+            "label": "Collector 1",
+            "sub": "in-memory queue",
+            "kind": "service",
+            "col": 2,
+            "row": 0,
+            "highlight": true
+          },
+          {
+            "id": "c2",
+            "label": "Collectors 2–20",
+            "sub": "in-memory queue",
+            "kind": "service",
+            "col": 2,
+            "row": 1
+          },
+          {
+            "id": "tsdb",
+            "label": "Time-series DB",
+            "sub": "clustered, 30 days",
+            "kind": "db",
+            "col": 3
+          },
+          {
+            "id": "alert",
+            "label": "Alert evaluator",
+            "sub": "queries every 30 s",
+            "kind": "service",
+            "col": 4,
+            "row": 0
+          },
+          {
+            "id": "pager",
+            "label": "Pager",
+            "kind": "external",
+            "col": 4,
+            "row": 1
+          }
+        ],
+        "edges": [
+          {
+            "from": "h",
+            "to": "lb"
+          },
+          {
+            "from": "lb",
+            "to": "c1"
+          },
+          {
+            "from": "lb",
+            "to": "c2"
+          },
+          {
+            "from": "c1",
+            "to": "tsdb",
+            "label": "10k-point writes"
+          },
+          {
+            "from": "c2",
+            "to": "tsdb"
+          },
+          {
+            "from": "alert",
+            "to": "tsdb",
+            "label": "query"
+          },
+          {
+            "from": "alert",
+            "to": "pager"
+          }
+        ]
+      },
+      "explanationMd": "An unbounded queue hides **backpressure**: the collector keeps answering 202 while the database falls behind, so the queue grows until the process is OOM-killed and loses everything it buffered. The load balancer then sends the same traffic to fewer collectors, which fail faster (a cascading failure), and autoscaling on CPU doesn't notice because threads waiting on the database use little CPU. Bound the queue and shed load when it's full: answer 503 or 429 so agents back off and drop old batches, which the requirements allow."
+    }
+  ]
+}

@@ -1,0 +1,3575 @@
+{
+ "kind": "leet",
+ "cases": [
+  {
+   "id": "dl-binary-search",
+   "kind": "leet",
+   "type": "choice",
+   "title": "Search that stops one short",
+   "briefMd": "Return the index of `target` in the sorted array `nums`, or `-1` if it isn't there.",
+   "similarLC": {
+    "number": 704,
+    "title": "Binary Search"
+   },
+   "tags": [
+    "binary search"
+   ],
+   "choices": [
+    "The loop stops while one candidate is still left: it should run while `lo <= hi`.",
+    "Computing `mid` from `lo + hi` can overflow, so `mid` is sometimes wrong.",
+    "When `nums[mid] < target` it should move `hi`, not `lo`.",
+    "It should return `lo` instead of `-1` when the target is missing."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "`hi` starts at the last index, so the search range is inclusive: `[lo, hi]`. With `lo < hi` the loop exits when exactly one element is left, without ever looking at it. Searching for 5 in `[5]` compares nothing and returns -1, and the last element of a range can be skipped, e.g. 3 in `[1, 3]`. Inclusive bounds need `while lo <= hi`.",
+   "run": {
+    "signature": {
+     "fn": "search",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      },
+      {
+       "name": "target",
+       "type": "int"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        -1,
+        0,
+        3,
+        5,
+        9,
+        12
+       ],
+       9
+      ],
+      "expected": 4
+     },
+     {
+      "args": [
+       [
+        -1,
+        0,
+        3,
+        5,
+        9,
+        12
+       ],
+       2
+      ],
+      "expected": -1
+     },
+     {
+      "args": [
+       [
+        5
+       ],
+       5
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        1,
+        3
+       ],
+       3
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        2,
+        4,
+        6,
+        8
+       ],
+       2
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        2,
+        4,
+        6,
+        8
+       ],
+       8
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       [
+        1
+       ],
+       0
+      ],
+      "expected": -1
+     },
+     {
+      "args": [
+       [],
+       1
+      ],
+      "expected": -1
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def search(self, nums: List[int], target: int) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo < hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] == target:",
+      "                return mid",
+      "            if nums[mid] < target:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid - 1",
+      "        return -1"
+     ],
+     "bad": [
+      4
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def search(self, nums: List[int], target: int) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo <= hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] == target:",
+      "                return mid",
+      "            if nums[mid] < target:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid - 1",
+      "        return -1"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int search(int[] nums, int target) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return -1;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      4
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int search(int[] nums, int target) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return -1;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int search(vector<int>& nums, int target) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return -1;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int search(vector<int>& nums, int target) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return -1;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-two-sum-order",
+   "kind": "leet",
+   "type": "choice",
+   "title": "A number that pairs with itself",
+   "briefMd": "Return the indices `[i, j]` (`i < j`) of two different elements of `nums` that add up to `target`, or `[]` if there are none.",
+   "similarLC": {
+    "number": 1,
+    "title": "Two Sum"
+   },
+   "tags": [
+    "hash map"
+   ],
+   "choices": [
+    "It records each number before looking for its partner, so a number can pair with itself.",
+    "A hash map can't find the partner in O(1); the array has to be sorted first.",
+    "It should look up `target + x`, not `target - x`.",
+    "It returns the two indices in the wrong order."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "The map should only hold numbers *before* index `i`. Here `x` is stored first, so when `target - x == x` the lookup finds `x` itself and returns `[i, i]`: with `[3, 2, 4]` and target 6 it answers `[0, 0]` instead of `[1, 2]`. Check for the partner first, then record the number.",
+   "run": {
+    "signature": {
+     "fn": "twoSum",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      },
+      {
+       "name": "target",
+       "type": "int"
+      }
+     ],
+     "returns": "int[]"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        2,
+        7,
+        11,
+        15
+       ],
+       9
+      ],
+      "expected": [
+       0,
+       1
+      ]
+     },
+     {
+      "args": [
+       [
+        3,
+        2,
+        4
+       ],
+       6
+      ],
+      "expected": [
+       1,
+       2
+      ]
+     },
+     {
+      "args": [
+       [
+        3,
+        3
+       ],
+       6
+      ],
+      "expected": [
+       0,
+       1
+      ]
+     },
+     {
+      "args": [
+       [
+        5,
+        1,
+        5
+       ],
+       10
+      ],
+      "expected": [
+       0,
+       2
+      ]
+     },
+     {
+      "args": [
+       [
+        0,
+        4,
+        3,
+        0
+       ],
+       0
+      ],
+      "expected": [
+       0,
+       3
+      ]
+     },
+     {
+      "args": [
+       [
+        1,
+        2
+       ],
+       10
+      ],
+      "expected": []
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def twoSum(self, nums: List[int], target: int) -> List[int]:",
+      "        seen = {}",
+      "        for i, x in enumerate(nums):",
+      "            seen[x] = i",
+      "            if target - x in seen:",
+      "                return [seen[target - x], i]",
+      "        return []"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def twoSum(self, nums: List[int], target: int) -> List[int]:",
+      "        seen = {}",
+      "        for i, x in enumerate(nums):",
+      "            if target - x in seen:",
+      "                return [seen[target - x], i]",
+      "            seen[x] = i",
+      "        return []"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int[] twoSum(int[] nums, int target) {",
+      "        Map<Integer, Integer> seen = new HashMap<>();",
+      "        for (int i = 0; i < nums.length; i++) {",
+      "            seen.put(nums[i], i);",
+      "            Integer j = seen.get(target - nums[i]);",
+      "            if (j != null) return new int[]{j, i};",
+      "        }",
+      "        return new int[0];",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int[] twoSum(int[] nums, int target) {",
+      "        Map<Integer, Integer> seen = new HashMap<>();",
+      "        for (int i = 0; i < nums.length; i++) {",
+      "            Integer j = seen.get(target - nums[i]);",
+      "            if (j != null) return new int[]{j, i};",
+      "            seen.put(nums[i], i);",
+      "        }",
+      "        return new int[0];",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    vector<int> twoSum(vector<int>& nums, int target) {",
+      "        unordered_map<int, int> seen;",
+      "        for (int i = 0; i < (int)nums.size(); i++) {",
+      "            seen[nums[i]] = i;",
+      "            auto it = seen.find(target - nums[i]);",
+      "            if (it != seen.end()) return {it->second, i};",
+      "        }",
+      "        return {};",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    vector<int> twoSum(vector<int>& nums, int target) {",
+      "        unordered_map<int, int> seen;",
+      "        for (int i = 0; i < (int)nums.size(); i++) {",
+      "            auto it = seen.find(target - nums[i]);",
+      "            if (it != seen.end()) return {it->second, i};",
+      "            seen[nums[i]] = i;",
+      "        }",
+      "        return {};",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-kadane-zero",
+   "kind": "leet",
+   "type": "choice",
+   "title": "The best sum is never negative",
+   "briefMd": "Return the largest sum of a non-empty contiguous subarray of `nums`.",
+   "similarLC": {
+    "number": 53,
+    "title": "Maximum Subarray"
+   },
+   "tags": [
+    "dynamic programming",
+    "kadane"
+   ],
+   "choices": [
+    "`best` starts at 0, so an all-negative array reports 0, a sum no subarray has.",
+    "`cur` should drop to 0 whenever it goes negative instead of becoming `x`.",
+    "It only considers subarrays that start at index 0.",
+    "`max(x, cur + x)` should be `min(x, cur + x)`."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "The subarray must be non-empty, so the answer can be negative. Starting `best` at 0 acts like an empty subarray worth 0: for `[-3, -1, -2]` it returns 0 instead of -1. Start `best` at `nums[0]` (or negative infinity).",
+   "run": {
+    "signature": {
+     "fn": "maxSubArray",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        -2,
+        1,
+        -3,
+        4,
+        -1,
+        2,
+        1,
+        -5,
+        4
+       ]
+      ],
+      "expected": 6
+     },
+     {
+      "args": [
+       [
+        1
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        5,
+        4,
+        -1,
+        7,
+        8
+       ]
+      ],
+      "expected": 23
+     },
+     {
+      "args": [
+       [
+        -3,
+        -1,
+        -2
+       ]
+      ],
+      "expected": -1
+     },
+     {
+      "args": [
+       [
+        -5
+       ]
+      ],
+      "expected": -5
+     },
+     {
+      "args": [
+       [
+        0,
+        -1
+       ]
+      ],
+      "expected": 0
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def maxSubArray(self, nums: List[int]) -> int:",
+      "        best = 0",
+      "        cur = 0",
+      "        for x in nums:",
+      "            cur = max(x, cur + x)",
+      "            best = max(best, cur)",
+      "        return best"
+     ],
+     "bad": [
+      3
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def maxSubArray(self, nums: List[int]) -> int:",
+      "        best = nums[0]",
+      "        cur = 0",
+      "        for x in nums:",
+      "            cur = max(x, cur + x)",
+      "            best = max(best, cur)",
+      "        return best"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int maxSubArray(int[] nums) {",
+      "        int best = 0;",
+      "        int cur = 0;",
+      "        for (int x : nums) {",
+      "            cur = Math.max(x, cur + x);",
+      "            best = Math.max(best, cur);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      3
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int maxSubArray(int[] nums) {",
+      "        int best = nums[0];",
+      "        int cur = 0;",
+      "        for (int x : nums) {",
+      "            cur = Math.max(x, cur + x);",
+      "            best = Math.max(best, cur);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int maxSubArray(vector<int>& nums) {",
+      "        int best = 0;",
+      "        int cur = 0;",
+      "        for (int x : nums) {",
+      "            cur = max(x, cur + x);",
+      "            best = max(best, cur);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      4
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int maxSubArray(vector<int>& nums) {",
+      "        int best = nums[0];",
+      "        int cur = 0;",
+      "        for (int x : nums) {",
+      "            cur = max(x, cur + x);",
+      "            best = max(best, cur);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-parens-leftover",
+   "kind": "leet",
+   "type": "choice",
+   "title": "Brackets left open",
+   "briefMd": "Return whether `s` (only `()[]{}` characters) is balanced: every bracket closes in the right order.",
+   "similarLC": {
+    "number": 20,
+    "title": "Valid Parentheses"
+   },
+   "tags": [
+    "stack"
+   ],
+   "choices": [
+    "Opening brackets still on the stack at the end are never checked, so `\"((\"` counts as balanced.",
+    "It should push closing brackets and pop on opening ones.",
+    "Checking for an empty stack before popping rejects valid strings.",
+    "It fails on nested pairs such as `\"([])\"`."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "Every closing bracket is matched correctly, but nothing checks for openers that never got closed. `\"((\"` pushes twice, never pops, and the function returns true. The answer is \"balanced\" only if the stack is empty at the end.",
+   "run": {
+    "signature": {
+     "fn": "isValid",
+     "params": [
+      {
+       "name": "s",
+       "type": "string"
+      }
+     ],
+     "returns": "bool"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       "()"
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "()[]{}"
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "(]"
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       "([])"
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "(("
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       "{[]"
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       ""
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "]"
+      ],
+      "expected": false
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def isValid(self, s: str) -> bool:",
+      "        pairs = {')': '(', ']': '[', '}': '{'}",
+      "        stack = []",
+      "        for ch in s:",
+      "            if ch in pairs:",
+      "                if not stack or stack.pop() != pairs[ch]:",
+      "                    return False",
+      "            else:",
+      "                stack.append(ch)",
+      "        return True"
+     ],
+     "bad": [
+      11
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def isValid(self, s: str) -> bool:",
+      "        pairs = {')': '(', ']': '[', '}': '{'}",
+      "        stack = []",
+      "        for ch in s:",
+      "            if ch in pairs:",
+      "                if not stack or stack.pop() != pairs[ch]:",
+      "                    return False",
+      "            else:",
+      "                stack.append(ch)",
+      "        return not stack"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public boolean isValid(String s) {",
+      "        Deque<Character> stack = new ArrayDeque<>();",
+      "        for (char ch : s.toCharArray()) {",
+      "            if (ch == '(' || ch == '[' || ch == '{') {",
+      "                stack.push(ch);",
+      "            } else {",
+      "                if (stack.isEmpty()) return false;",
+      "                char open = stack.pop();",
+      "                if ((ch == ')' && open != '(') || (ch == ']' && open != '[') || (ch == '}' && open != '{')) return false;",
+      "            }",
+      "        }",
+      "        return true;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      13
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public boolean isValid(String s) {",
+      "        Deque<Character> stack = new ArrayDeque<>();",
+      "        for (char ch : s.toCharArray()) {",
+      "            if (ch == '(' || ch == '[' || ch == '{') {",
+      "                stack.push(ch);",
+      "            } else {",
+      "                if (stack.isEmpty()) return false;",
+      "                char open = stack.pop();",
+      "                if ((ch == ')' && open != '(') || (ch == ']' && open != '[') || (ch == '}' && open != '{')) return false;",
+      "            }",
+      "        }",
+      "        return stack.isEmpty();",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    bool isValid(string s) {",
+      "        vector<char> stack;",
+      "        for (char ch : s) {",
+      "            if (ch == '(' || ch == '[' || ch == '{') {",
+      "                stack.push_back(ch);",
+      "            } else {",
+      "                if (stack.empty()) return false;",
+      "                char open = stack.back();",
+      "                stack.pop_back();",
+      "                if ((ch == ')' && open != '(') || (ch == ']' && open != '[') || (ch == '}' && open != '{')) return false;",
+      "            }",
+      "        }",
+      "        return true;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      15
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    bool isValid(string s) {",
+      "        vector<char> stack;",
+      "        for (char ch : s) {",
+      "            if (ch == '(' || ch == '[' || ch == '{') {",
+      "                stack.push_back(ch);",
+      "            } else {",
+      "                if (stack.empty()) return false;",
+      "                char open = stack.back();",
+      "                stack.pop_back();",
+      "                if ((ch == ')' && open != '(') || (ch == ']' && open != '[') || (ch == '}' && open != '{')) return false;",
+      "            }",
+      "        }",
+      "        return stack.empty();",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-merge-unsorted",
+   "kind": "leet",
+   "type": "choice",
+   "title": "Merging in the order given",
+   "briefMd": "Merge all overlapping intervals (touching ones like `[1,4]` and `[4,5]` count) and return them sorted by start.",
+   "similarLC": {
+    "number": 56,
+    "title": "Merge Intervals"
+   },
+   "tags": [
+    "intervals",
+    "sorting"
+   ],
+   "choices": [
+    "The intervals are never sorted by start, so overlapping ones that aren't next to each other stay apart.",
+    "`start <= last end` should be `start < last end`: touching intervals must stay separate.",
+    "It should keep `min` of the two ends, not `max`.",
+    "It needs a second pass to merge chains of three or more intervals."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "The one-pass merge only works if each interval can only overlap the one just before it, which is true once they are sorted by start. Unsorted, `[[8,10],[1,3],[2,6]]` keeps `[8,10]` first and never merges correctly. Sort by start first (O(n log n)), then sweep.",
+   "run": {
+    "signature": {
+     "fn": "merge",
+     "params": [
+      {
+       "name": "intervals",
+       "type": "int[][]"
+      }
+     ],
+     "returns": "int[][]"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        [
+         1,
+         3
+        ],
+        [
+         2,
+         6
+        ],
+        [
+         8,
+         10
+        ],
+        [
+         15,
+         18
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        1,
+        6
+       ],
+       [
+        8,
+        10
+       ],
+       [
+        15,
+        18
+       ]
+      ]
+     },
+     {
+      "args": [
+       [
+        [
+         1,
+         4
+        ],
+        [
+         4,
+         5
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        1,
+        5
+       ]
+      ]
+     },
+     {
+      "args": [
+       [
+        [
+         8,
+         10
+        ],
+        [
+         1,
+         3
+        ],
+        [
+         2,
+         6
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        1,
+        6
+       ],
+       [
+        8,
+        10
+       ]
+      ]
+     },
+     {
+      "args": [
+       [
+        [
+         1,
+         4
+        ],
+        [
+         0,
+         4
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "args": [
+       [
+        [
+         5,
+         6
+        ],
+        [
+         1,
+         2
+        ],
+        [
+         3,
+         4
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        1,
+        2
+       ],
+       [
+        3,
+        4
+       ],
+       [
+        5,
+        6
+       ]
+      ]
+     },
+     {
+      "args": [
+       [
+        [
+         1,
+         10
+        ],
+        [
+         2,
+         3
+        ],
+        [
+         4,
+         5
+        ]
+       ]
+      ],
+      "expected": [
+       [
+        1,
+        10
+       ]
+      ]
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def merge(self, intervals: List[List[int]]) -> List[List[int]]:",
+      "        out = []",
+      "        for start, end in intervals:",
+      "            if out and start <= out[-1][1]:",
+      "                out[-1][1] = max(out[-1][1], end)",
+      "            else:",
+      "                out.append([start, end])",
+      "        return out"
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def merge(self, intervals: List[List[int]]) -> List[List[int]]:",
+      "        intervals.sort()",
+      "        out = []",
+      "        for start, end in intervals:",
+      "            if out and start <= out[-1][1]:",
+      "                out[-1][1] = max(out[-1][1], end)",
+      "            else:",
+      "                out.append([start, end])",
+      "        return out"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int[][] merge(int[][] intervals) {",
+      "        List<int[]> out = new ArrayList<>();",
+      "        for (int[] iv : intervals) {",
+      "            if (!out.isEmpty() && iv[0] <= out.get(out.size() - 1)[1]) {",
+      "                int[] last = out.get(out.size() - 1);",
+      "                last[1] = Math.max(last[1], iv[1]);",
+      "            } else {",
+      "                out.add(new int[]{iv[0], iv[1]});",
+      "            }",
+      "        }",
+      "        return out.toArray(new int[0][]);",
+      "    }",
+      "}"
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int[][] merge(int[][] intervals) {",
+      "        Arrays.sort(intervals, (a, b) -> Integer.compare(a[0], b[0]));",
+      "        List<int[]> out = new ArrayList<>();",
+      "        for (int[] iv : intervals) {",
+      "            if (!out.isEmpty() && iv[0] <= out.get(out.size() - 1)[1]) {",
+      "                int[] last = out.get(out.size() - 1);",
+      "                last[1] = Math.max(last[1], iv[1]);",
+      "            } else {",
+      "                out.add(new int[]{iv[0], iv[1]});",
+      "            }",
+      "        }",
+      "        return out.toArray(new int[0][]);",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    vector<vector<int>> merge(vector<vector<int>>& intervals) {",
+      "        vector<vector<int>> out;",
+      "        for (auto& iv : intervals) {",
+      "            if (!out.empty() && iv[0] <= out.back()[1]) {",
+      "                out.back()[1] = max(out.back()[1], iv[1]);",
+      "            } else {",
+      "                out.push_back(iv);",
+      "            }",
+      "        }",
+      "        return out;",
+      "    }",
+      "};"
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    vector<vector<int>> merge(vector<vector<int>>& intervals) {",
+      "        sort(intervals.begin(), intervals.end());",
+      "        vector<vector<int>> out;",
+      "        for (auto& iv : intervals) {",
+      "            if (!out.empty() && iv[0] <= out.back()[1]) {",
+      "                out.back()[1] = max(out.back()[1], iv[1]);",
+      "            } else {",
+      "                out.push_back(iv);",
+      "            }",
+      "        }",
+      "        return out;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-stock-yesterday",
+   "kind": "leet",
+   "type": "choice",
+   "title": "Buying yesterday",
+   "briefMd": "`prices[i]` is a stock's price on day `i`. Return the best profit from buying on one day and selling on a later day (0 if no profit is possible).",
+   "similarLC": {
+    "number": 121,
+    "title": "Best Time to Buy and Sell Stock"
+   },
+   "tags": [
+    "greedy",
+    "arrays"
+   ],
+   "choices": [
+    "It compares each price with the day before instead of with the lowest price so far.",
+    "`low` has to be updated before the profit is computed.",
+    "`best` should start at `prices[0]`.",
+    "It should walk from the last day backwards to find the highest price first."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "`low` tracks the cheapest day so far, but the profit line ignores it and uses `prices[i - 1]`, which only finds the best *one-day* rise. For `[1, 2, 3, 4, 5]` it answers 1 instead of 4. Selling today is best paired with the lowest earlier price: `prices[i] - low`.",
+   "run": {
+    "signature": {
+     "fn": "maxProfit",
+     "params": [
+      {
+       "name": "prices",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        7,
+        1,
+        5,
+        3,
+        6,
+        4
+       ]
+      ],
+      "expected": 5
+     },
+     {
+      "args": [
+       [
+        7,
+        6,
+        4,
+        3,
+        1
+       ]
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      ],
+      "expected": 4
+     },
+     {
+      "args": [
+       [
+        2
+       ]
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        3,
+        8,
+        1,
+        9
+       ]
+      ],
+      "expected": 8
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def maxProfit(self, prices: List[int]) -> int:",
+      "        best = 0",
+      "        low = prices[0]",
+      "        for i in range(1, len(prices)):",
+      "            best = max(best, prices[i] - prices[i - 1])",
+      "            low = min(low, prices[i])",
+      "        return best"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def maxProfit(self, prices: List[int]) -> int:",
+      "        best = 0",
+      "        low = prices[0]",
+      "        for i in range(1, len(prices)):",
+      "            best = max(best, prices[i] - low)",
+      "            low = min(low, prices[i])",
+      "        return best"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int maxProfit(int[] prices) {",
+      "        int best = 0, low = prices[0];",
+      "        for (int i = 1; i < prices.length; i++) {",
+      "            best = Math.max(best, prices[i] - prices[i - 1]);",
+      "            low = Math.min(low, prices[i]);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int maxProfit(int[] prices) {",
+      "        int best = 0, low = prices[0];",
+      "        for (int i = 1; i < prices.length; i++) {",
+      "            best = Math.max(best, prices[i] - low);",
+      "            low = Math.min(low, prices[i]);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int maxProfit(vector<int>& prices) {",
+      "        int best = 0, low = prices[0];",
+      "        for (int i = 1; i < (int)prices.size(); i++) {",
+      "            best = max(best, prices[i] - prices[i - 1]);",
+      "            low = min(low, prices[i]);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int maxProfit(vector<int>& prices) {",
+      "        int best = 0, low = prices[0];",
+      "        for (int i = 1; i < (int)prices.size(); i++) {",
+      "            best = max(best, prices[i] - low);",
+      "            low = min(low, prices[i]);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-window-backwards",
+   "kind": "leet",
+   "type": "lines",
+   "title": "A window that slides back",
+   "briefMd": "Return the length of the longest substring of `s` with no repeated characters.",
+   "similarLC": {
+    "number": 3,
+    "title": "Longest Substring Without Repeating Characters"
+   },
+   "tags": [
+    "sliding window",
+    "hash map"
+   ],
+   "explanationMd": "When `ch` was seen before, the window must start after that earlier copy, but only if that copy is still inside the window. Without `max`, `left` can jump backwards: in `\"abba\"`, the second `a` moves `left` back to 1 and the window `\"bba\"` (length 3) is counted. `left = max(left, last[ch] + 1)` keeps the window moving forward only.",
+   "run": {
+    "signature": {
+     "fn": "lengthOfLongestSubstring",
+     "params": [
+      {
+       "name": "s",
+       "type": "string"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       "abcabcbb"
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       "bbbbb"
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       "pwwkew"
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       ""
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       "abba"
+      ],
+      "expected": 2
+     },
+     {
+      "args": [
+       "tmmzuxt"
+      ],
+      "expected": 5
+     },
+     {
+      "args": [
+       "dvdf"
+      ],
+      "expected": 3
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def lengthOfLongestSubstring(self, s: str) -> int:",
+      "        last = {}",
+      "        left = best = 0",
+      "        for right, ch in enumerate(s):",
+      "            if ch in last:",
+      "                left = last[ch] + 1",
+      "            last[ch] = right",
+      "            best = max(best, right - left + 1)",
+      "        return best"
+     ],
+     "bad": [
+      7
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def lengthOfLongestSubstring(self, s: str) -> int:",
+      "        last = {}",
+      "        left = best = 0",
+      "        for right, ch in enumerate(s):",
+      "            if ch in last:",
+      "                left = max(left, last[ch] + 1)",
+      "            last[ch] = right",
+      "            best = max(best, right - left + 1)",
+      "        return best"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int lengthOfLongestSubstring(String s) {",
+      "        Map<Character, Integer> last = new HashMap<>();",
+      "        int left = 0, best = 0;",
+      "        for (int right = 0; right < s.length(); right++) {",
+      "            char ch = s.charAt(right);",
+      "            if (last.containsKey(ch)) {",
+      "                left = last.get(ch) + 1;",
+      "            }",
+      "            last.put(ch, right);",
+      "            best = Math.max(best, right - left + 1);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      8
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int lengthOfLongestSubstring(String s) {",
+      "        Map<Character, Integer> last = new HashMap<>();",
+      "        int left = 0, best = 0;",
+      "        for (int right = 0; right < s.length(); right++) {",
+      "            char ch = s.charAt(right);",
+      "            if (last.containsKey(ch)) {",
+      "                left = Math.max(left, last.get(ch) + 1);",
+      "            }",
+      "            last.put(ch, right);",
+      "            best = Math.max(best, right - left + 1);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int lengthOfLongestSubstring(string s) {",
+      "        unordered_map<char, int> last;",
+      "        int left = 0, best = 0;",
+      "        for (int right = 0; right < (int)s.size(); right++) {",
+      "            char ch = s[right];",
+      "            if (last.count(ch)) {",
+      "                left = last[ch] + 1;",
+      "            }",
+      "            last[ch] = right;",
+      "            best = max(best, right - left + 1);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      9
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int lengthOfLongestSubstring(string s) {",
+      "        unordered_map<char, int> last;",
+      "        int left = 0, best = 0;",
+      "        for (int right = 0; right < (int)s.size(); right++) {",
+      "            char ch = s[right];",
+      "            if (last.count(ch)) {",
+      "                left = max(left, last[ch] + 1);",
+      "            }",
+      "            last[ch] = right;",
+      "            best = max(best, right - left + 1);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-water-pointers",
+   "kind": "leet",
+   "type": "lines",
+   "title": "Moving the wrong wall",
+   "briefMd": "`height[i]` is a wall at position `i`. Return the most water two walls can hold: `(j - i) * min(height[i], height[j])`.",
+   "similarLC": {
+    "number": 11,
+    "title": "Container With Most Water"
+   },
+   "tags": [
+    "two pointers",
+    "greedy"
+   ],
+   "explanationMd": "The area is limited by the shorter wall. Moving the taller wall inward can never help (the width shrinks and the height is still capped by the short wall), so the two-pointer scan must move the **shorter** side. These two lines are swapped: it moves `r` when the left wall is shorter, and `l` otherwise.",
+   "run": {
+    "signature": {
+     "fn": "maxArea",
+     "params": [
+      {
+       "name": "height",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        8,
+        6,
+        2,
+        5,
+        4,
+        8,
+        3,
+        7
+       ]
+      ],
+      "expected": 49
+     },
+     {
+      "args": [
+       [
+        1,
+        1
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        4,
+        3,
+        2,
+        1,
+        4
+       ]
+      ],
+      "expected": 16
+     },
+     {
+      "args": [
+       [
+        1,
+        2,
+        1
+       ]
+      ],
+      "expected": 2
+     },
+     {
+      "args": [
+       [
+        2,
+        3,
+        10,
+        5,
+        7,
+        8,
+        9
+       ]
+      ],
+      "expected": 36
+     },
+     {
+      "args": [
+       [
+        1,
+        2,
+        4,
+        3
+       ]
+      ],
+      "expected": 4
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def maxArea(self, height: List[int]) -> int:",
+      "        l, r = 0, len(height) - 1",
+      "        best = 0",
+      "        while l < r:",
+      "            best = max(best, (r - l) * min(height[l], height[r]))",
+      "            if height[l] < height[r]:",
+      "                r -= 1",
+      "            else:",
+      "                l += 1",
+      "        return best"
+     ],
+     "bad": [
+      8,
+      10
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def maxArea(self, height: List[int]) -> int:",
+      "        l, r = 0, len(height) - 1",
+      "        best = 0",
+      "        while l < r:",
+      "            best = max(best, (r - l) * min(height[l], height[r]))",
+      "            if height[l] < height[r]:",
+      "                l += 1",
+      "            else:",
+      "                r -= 1",
+      "        return best"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int maxArea(int[] height) {",
+      "        int l = 0, r = height.length - 1, best = 0;",
+      "        while (l < r) {",
+      "            best = Math.max(best, (r - l) * Math.min(height[l], height[r]));",
+      "            if (height[l] < height[r]) {",
+      "                r--;",
+      "            } else {",
+      "                l++;",
+      "            }",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      7,
+      9
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int maxArea(int[] height) {",
+      "        int l = 0, r = height.length - 1, best = 0;",
+      "        while (l < r) {",
+      "            best = Math.max(best, (r - l) * Math.min(height[l], height[r]));",
+      "            if (height[l] < height[r]) {",
+      "                l++;",
+      "            } else {",
+      "                r--;",
+      "            }",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int maxArea(vector<int>& height) {",
+      "        int l = 0, r = (int)height.size() - 1, best = 0;",
+      "        while (l < r) {",
+      "            best = max(best, (r - l) * min(height[l], height[r]));",
+      "            if (height[l] < height[r]) {",
+      "                r--;",
+      "            } else {",
+      "                l++;",
+      "            }",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      8,
+      10
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int maxArea(vector<int>& height) {",
+      "        int l = 0, r = (int)height.size() - 1, best = 0;",
+      "        while (l < r) {",
+      "            best = max(best, (r - l) * min(height[l], height[r]));",
+      "            if (height[l] < height[r]) {",
+      "                l++;",
+      "            } else {",
+      "                r--;",
+      "            }",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-insert-position",
+   "kind": "leet",
+   "type": "lines",
+   "title": "One place too early",
+   "briefMd": "`nums` is sorted with distinct values. Return the index of `target`, or the index where it would be inserted to keep `nums` sorted.",
+   "similarLC": {
+    "number": 35,
+    "title": "Search Insert Position"
+   },
+   "tags": [
+    "binary search"
+   ],
+   "explanationMd": "When the loop ends without finding `target`, `lo` and `hi` have crossed: `hi` is the last element smaller than `target` and `lo = hi + 1` is the first larger one, which is exactly where `target` belongs. Returning `hi` is one too early (and -1 for a target smaller than everything).",
+   "run": {
+    "signature": {
+     "fn": "searchInsert",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      },
+      {
+       "name": "target",
+       "type": "int"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        3,
+        5,
+        6
+       ],
+       5
+      ],
+      "expected": 2
+     },
+     {
+      "args": [
+       [
+        1,
+        3,
+        5,
+        6
+       ],
+       2
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        1,
+        3,
+        5,
+        6
+       ],
+       7
+      ],
+      "expected": 4
+     },
+     {
+      "args": [
+       [
+        1,
+        3,
+        5,
+        6
+       ],
+       0
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        1
+       ],
+       1
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        2,
+        4
+       ],
+       3
+      ],
+      "expected": 1
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def searchInsert(self, nums: List[int], target: int) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo <= hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] == target:",
+      "                return mid",
+      "            if nums[mid] < target:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid - 1",
+      "        return hi"
+     ],
+     "bad": [
+      12
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def searchInsert(self, nums: List[int], target: int) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo <= hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] == target:",
+      "                return mid",
+      "            if nums[mid] < target:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid - 1",
+      "        return lo"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int searchInsert(int[] nums, int target) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return hi;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      10
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int searchInsert(int[] nums, int target) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return lo;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int searchInsert(vector<int>& nums, int target) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return hi;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      11
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int searchInsert(vector<int>& nums, int target) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo <= hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] == target) return mid;",
+      "            if (nums[mid] < target) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return lo;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-robber-neighbours",
+   "kind": "leet",
+   "type": "lines",
+   "title": "Robbing next door",
+   "briefMd": "Houses stand in a row; `nums[i]` is the cash in house `i`. Return the most you can take without taking from two adjacent houses.",
+   "similarLC": {
+    "number": 198,
+    "title": "House Robber"
+   },
+   "tags": [
+    "dynamic programming"
+   ],
+   "explanationMd": "`cur` is the best total up to the previous house and `prev` the best up to the one before it. For house `x` you either skip it (`cur`) or take it on top of the best that ends two houses back (`prev + x`). The buggy line adds `x` to `cur`, which may already include the neighbour: for `[1, 2, 3, 1]` it returns 6 instead of 4.",
+   "run": {
+    "signature": {
+     "fn": "rob",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      "expected": 4
+     },
+     {
+      "args": [
+       [
+        2,
+        7,
+        9,
+        3,
+        1
+       ]
+      ],
+      "expected": 12
+     },
+     {
+      "args": [
+       [
+        5
+       ]
+      ],
+      "expected": 5
+     },
+     {
+      "args": [
+       []
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        2,
+        1,
+        1,
+        2
+       ]
+      ],
+      "expected": 4
+     },
+     {
+      "args": [
+       [
+        0,
+        0
+       ]
+      ],
+      "expected": 0
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def rob(self, nums: List[int]) -> int:",
+      "        prev, cur = 0, 0",
+      "        for x in nums:",
+      "            prev, cur = cur, max(prev, cur + x)",
+      "        return cur"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def rob(self, nums: List[int]) -> int:",
+      "        prev, cur = 0, 0",
+      "        for x in nums:",
+      "            prev, cur = cur, max(cur, prev + x)",
+      "        return cur"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int rob(int[] nums) {",
+      "        int prev = 0, cur = 0;",
+      "        for (int x : nums) {",
+      "            int next = Math.max(prev, cur + x);",
+      "            prev = cur;",
+      "            cur = next;",
+      "        }",
+      "        return cur;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int rob(int[] nums) {",
+      "        int prev = 0, cur = 0;",
+      "        for (int x : nums) {",
+      "            int next = Math.max(cur, prev + x);",
+      "            prev = cur;",
+      "            cur = next;",
+      "        }",
+      "        return cur;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int rob(vector<int>& nums) {",
+      "        int prev = 0, cur = 0;",
+      "        for (int x : nums) {",
+      "            int next = max(prev, cur + x);",
+      "            prev = cur;",
+      "            cur = next;",
+      "        }",
+      "        return cur;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int rob(vector<int>& nums) {",
+      "        int prev = 0, cur = 0;",
+      "        for (int x : nums) {",
+      "            int next = max(cur, prev + x);",
+      "            prev = cur;",
+      "            cur = next;",
+      "        }",
+      "        return cur;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-product-suffix",
+   "kind": "leet",
+   "type": "lines",
+   "title": "The first slot never sees the right side",
+   "briefMd": "Return an array where element `i` is the product of every element of `nums` except `nums[i]`, without using division.",
+   "similarLC": {
+    "number": 238,
+    "title": "Product of Array Except Self"
+   },
+   "tags": [
+    "prefix sums",
+    "arrays"
+   ],
+   "explanationMd": "The first pass stores the product of everything left of `i`; the second pass must multiply in the product of everything right of `i` for **every** index, including 0. The loop stops at 1, so `res[0]` keeps 1 instead of the product of the rest: `[1, 2, 3, 4]` gives `[1, 12, 8, 6]`.",
+   "run": {
+    "signature": {
+     "fn": "productExceptSelf",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int[]"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        4
+       ]
+      ],
+      "expected": [
+       24,
+       12,
+       8,
+       6
+      ]
+     },
+     {
+      "args": [
+       [
+        -1,
+        1,
+        0,
+        -3,
+        3
+       ]
+      ],
+      "expected": [
+       0,
+       0,
+       9,
+       0,
+       0
+      ]
+     },
+     {
+      "args": [
+       [
+        2,
+        3
+       ]
+      ],
+      "expected": [
+       3,
+       2
+      ]
+     },
+     {
+      "args": [
+       [
+        5,
+        1,
+        1
+       ]
+      ],
+      "expected": [
+       1,
+       5,
+       5
+      ]
+     },
+     {
+      "args": [
+       [
+        2,
+        2,
+        2,
+        2
+       ]
+      ],
+      "expected": [
+       8,
+       8,
+       8,
+       8
+      ]
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def productExceptSelf(self, nums: List[int]) -> List[int]:",
+      "        n = len(nums)",
+      "        res = [1] * n",
+      "        prefix = 1",
+      "        for i in range(n):",
+      "            res[i] = prefix",
+      "            prefix *= nums[i]",
+      "        suffix = 1",
+      "        for i in range(n - 1, 0, -1):",
+      "            res[i] *= suffix",
+      "            suffix *= nums[i]",
+      "        return res"
+     ],
+     "bad": [
+      10
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def productExceptSelf(self, nums: List[int]) -> List[int]:",
+      "        n = len(nums)",
+      "        res = [1] * n",
+      "        prefix = 1",
+      "        for i in range(n):",
+      "            res[i] = prefix",
+      "            prefix *= nums[i]",
+      "        suffix = 1",
+      "        for i in range(n - 1, -1, -1):",
+      "            res[i] *= suffix",
+      "            suffix *= nums[i]",
+      "        return res"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int[] productExceptSelf(int[] nums) {",
+      "        int n = nums.length;",
+      "        int[] res = new int[n];",
+      "        int prefix = 1;",
+      "        for (int i = 0; i < n; i++) {",
+      "            res[i] = prefix;",
+      "            prefix *= nums[i];",
+      "        }",
+      "        int suffix = 1;",
+      "        for (int i = n - 1; i > 0; i--) {",
+      "            res[i] *= suffix;",
+      "            suffix *= nums[i];",
+      "        }",
+      "        return res;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      11
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int[] productExceptSelf(int[] nums) {",
+      "        int n = nums.length;",
+      "        int[] res = new int[n];",
+      "        int prefix = 1;",
+      "        for (int i = 0; i < n; i++) {",
+      "            res[i] = prefix;",
+      "            prefix *= nums[i];",
+      "        }",
+      "        int suffix = 1;",
+      "        for (int i = n - 1; i >= 0; i--) {",
+      "            res[i] *= suffix;",
+      "            suffix *= nums[i];",
+      "        }",
+      "        return res;",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    vector<int> productExceptSelf(vector<int>& nums) {",
+      "        int n = nums.size();",
+      "        vector<int> res(n, 1);",
+      "        int prefix = 1;",
+      "        for (int i = 0; i < n; i++) {",
+      "            res[i] = prefix;",
+      "            prefix *= nums[i];",
+      "        }",
+      "        int suffix = 1;",
+      "        for (int i = n - 1; i > 0; i--) {",
+      "            res[i] *= suffix;",
+      "            suffix *= nums[i];",
+      "        }",
+      "        return res;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      12
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    vector<int> productExceptSelf(vector<int>& nums) {",
+      "        int n = nums.size();",
+      "        vector<int> res(n, 1);",
+      "        int prefix = 1;",
+      "        for (int i = 0; i < n; i++) {",
+      "            res[i] = prefix;",
+      "            prefix *= nums[i];",
+      "        }",
+      "        int suffix = 1;",
+      "        for (int i = n - 1; i >= 0; i--) {",
+      "            res[i] *= suffix;",
+      "            suffix *= nums[i];",
+      "        }",
+      "        return res;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-rotated-min",
+   "kind": "leet",
+   "type": "lines",
+   "title": "Skipping the bottom",
+   "briefMd": "`nums` was sorted ascending (distinct values) and then rotated, e.g. `[3, 4, 5, 1, 2]`. Return its minimum in O(log n).",
+   "similarLC": {
+    "number": 153,
+    "title": "Find Minimum in Rotated Sorted Array"
+   },
+   "tags": [
+    "binary search"
+   ],
+   "explanationMd": "If `nums[mid] <= nums[hi]`, the right half is sorted, so the minimum is at `mid` or to its left. `mid` itself may be the minimum, so it must stay in range: `hi = mid`. With `hi = mid - 1`, `[3, 1, 2]` throws away the 1 and answers 3.",
+   "run": {
+    "signature": {
+     "fn": "findMin",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        3,
+        4,
+        5,
+        1,
+        2
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        4,
+        5,
+        6,
+        7,
+        0,
+        1,
+        2
+       ]
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        11,
+        13,
+        15,
+        17
+       ]
+      ],
+      "expected": 11
+     },
+     {
+      "args": [
+       [
+        3,
+        1,
+        2
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        2,
+        1
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        1
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        5,
+        6,
+        1,
+        2,
+        3,
+        4
+       ]
+      ],
+      "expected": 1
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def findMin(self, nums: List[int]) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo < hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] > nums[hi]:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid - 1",
+      "        return nums[lo]"
+     ],
+     "bad": [
+      9
+     ],
+     "fixed": [
+      "class Solution:",
+      "    def findMin(self, nums: List[int]) -> int:",
+      "        lo, hi = 0, len(nums) - 1",
+      "        while lo < hi:",
+      "            mid = (lo + hi) // 2",
+      "            if nums[mid] > nums[hi]:",
+      "                lo = mid + 1",
+      "            else:",
+      "                hi = mid",
+      "        return nums[lo]"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int findMin(int[] nums) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] > nums[hi]) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return nums[lo];",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      7
+     ],
+     "fixed": [
+      "class Solution {",
+      "    public int findMin(int[] nums) {",
+      "        int lo = 0, hi = nums.length - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] > nums[hi]) lo = mid + 1;",
+      "            else hi = mid;",
+      "        }",
+      "        return nums[lo];",
+      "    }",
+      "}"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int findMin(vector<int>& nums) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] > nums[hi]) lo = mid + 1;",
+      "            else hi = mid - 1;",
+      "        }",
+      "        return nums[lo];",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      8
+     ],
+     "fixed": [
+      "class Solution {",
+      "public:",
+      "    int findMin(vector<int>& nums) {",
+      "        int lo = 0, hi = (int)nums.size() - 1;",
+      "        while (lo < hi) {",
+      "            int mid = lo + (hi - lo) / 2;",
+      "            if (nums[mid] > nums[hi]) lo = mid + 1;",
+      "            else hi = mid;",
+      "        }",
+      "        return nums[lo];",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-duplicate-set",
+   "kind": "leet",
+   "type": "missing",
+   "title": "A set that stays empty",
+   "briefMd": "Return whether any value appears at least twice in `nums`.",
+   "similarLC": {
+    "number": 217,
+    "title": "Contains Duplicate"
+   },
+   "tags": [
+    "hash set"
+   ],
+   "explanationMd": "The set is the memory of values already seen. Without adding each value after checking it, the set stays empty and the function always answers false. One pass with a hash set is O(n) time and O(n) space.",
+   "run": {
+    "signature": {
+     "fn": "containsDuplicate",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "bool"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        4
+       ]
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       [
+        1,
+        1,
+        1,
+        3,
+        3,
+        4,
+        3,
+        2,
+        4,
+        2
+       ]
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       []
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       [
+        7
+       ]
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       [
+        -1,
+        5,
+        -1
+       ]
+      ],
+      "expected": true
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def containsDuplicate(self, nums: List[int]) -> bool:",
+      "        seen = set()",
+      "        for x in nums:",
+      "            if x in seen:",
+      "                return True",
+      "            «?»",
+      "        return False"
+     ],
+     "missing": [
+      "seen.add(x)"
+     ],
+     "accept": [
+      [
+       "seen |= {x}"
+      ]
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public boolean containsDuplicate(int[] nums) {",
+      "        Set<Integer> seen = new HashSet<>();",
+      "        for (int x : nums) {",
+      "            if (seen.contains(x)) return true;",
+      "            «?»",
+      "        }",
+      "        return false;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "seen.add(x);"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    bool containsDuplicate(vector<int>& nums) {",
+      "        unordered_set<int> seen;",
+      "        for (int x : nums) {",
+      "            if (seen.count(x)) return true;",
+      "            «?»",
+      "        }",
+      "        return false;",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "seen.insert(x);"
+     ],
+     "accept": [
+      [
+       "seen.emplace(x);"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-islands-visited",
+   "kind": "leet",
+   "type": "missing",
+   "title": "An island that never sinks",
+   "briefMd": "`grid` holds 1 (land) and 0 (water). Return the number of islands: groups of land cells connected up, down, left or right.",
+   "similarLC": {
+    "number": 200,
+    "title": "Number of Islands"
+   },
+   "tags": [
+    "graphs",
+    "dfs"
+   ],
+   "explanationMd": "`sink` has to mark each land cell as visited before exploring its neighbours, here by turning it into water. Without that, two neighbouring land cells keep calling each other forever and the recursion overflows the stack. Marking also makes sure each island is counted once.",
+   "run": {
+    "signature": {
+     "fn": "numIslands",
+     "params": [
+      {
+       "name": "grid",
+       "type": "int[][]"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        [
+         1,
+         1,
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         1,
+         0,
+         0,
+         0
+        ],
+        [
+         0,
+         0,
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         0,
+         0,
+         1,
+         1
+        ]
+       ]
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       [
+        [
+         1,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         1,
+         1,
+         1
+        ]
+       ]
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       [
+        [
+         0
+        ]
+       ]
+      ],
+      "expected": 0
+     },
+     {
+      "args": [
+       [
+        [
+         1,
+         0,
+         1,
+         0,
+         1
+        ]
+       ]
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       [
+        [
+         1
+        ]
+       ]
+      ],
+      "expected": 1
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def numIslands(self, grid: List[List[int]]) -> int:",
+      "        rows, cols = len(grid), len(grid[0])",
+      "",
+      "        def sink(r, c):",
+      "            if r < 0 or c < 0 or r >= rows or c >= cols or grid[r][c] == 0:",
+      "                return",
+      "            «?»",
+      "            sink(r + 1, c)",
+      "            sink(r - 1, c)",
+      "            sink(r, c + 1)",
+      "            sink(r, c - 1)",
+      "",
+      "        count = 0",
+      "        for r in range(rows):",
+      "            for c in range(cols):",
+      "                if grid[r][c] == 1:",
+      "                    count += 1",
+      "                    sink(r, c)",
+      "        return count"
+     ],
+     "missing": [
+      "grid[r][c] = 0"
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int numIslands(int[][] grid) {",
+      "        int count = 0;",
+      "        for (int r = 0; r < grid.length; r++)",
+      "            for (int c = 0; c < grid[0].length; c++)",
+      "                if (grid[r][c] == 1) {",
+      "                    count++;",
+      "                    sink(grid, r, c);",
+      "                }",
+      "        return count;",
+      "    }",
+      "",
+      "    private void sink(int[][] grid, int r, int c) {",
+      "        if (r < 0 || c < 0 || r >= grid.length || c >= grid[0].length || grid[r][c] == 0) return;",
+      "        «?»",
+      "        sink(grid, r + 1, c);",
+      "        sink(grid, r - 1, c);",
+      "        sink(grid, r, c + 1);",
+      "        sink(grid, r, c - 1);",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "grid[r][c] = 0;"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int numIslands(vector<vector<int>>& grid) {",
+      "        int count = 0;",
+      "        for (int r = 0; r < (int)grid.size(); r++)",
+      "            for (int c = 0; c < (int)grid[0].size(); c++)",
+      "                if (grid[r][c] == 1) {",
+      "                    count++;",
+      "                    sink(grid, r, c);",
+      "                }",
+      "        return count;",
+      "    }",
+      "",
+      "    void sink(vector<vector<int>>& grid, int r, int c) {",
+      "        if (r < 0 || c < 0 || r >= (int)grid.size() || c >= (int)grid[0].size() || grid[r][c] == 0) return;",
+      "        «?»",
+      "        sink(grid, r + 1, c);",
+      "        sink(grid, r - 1, c);",
+      "        sink(grid, r, c + 1);",
+      "        sink(grid, r, c - 1);",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "grid[r][c] = 0;"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-stairs-shift",
+   "kind": "leet",
+   "type": "missing",
+   "title": "Stairs that only count up by one",
+   "briefMd": "You climb `n` stairs taking 1 or 2 steps at a time. Return the number of distinct ways to reach the top.",
+   "similarLC": {
+    "number": 70,
+    "title": "Climbing Stairs"
+   },
+   "tags": [
+    "dynamic programming"
+   ],
+   "explanationMd": "The ways to reach step `i` are the ways to reach `i - 1` plus the ways to reach `i - 2`, so two running values `a` (two steps back) and `b` (one step back) shift forward each step: the new `b` is `a + b` and the new `a` is the old `b`. Without the shift the count only grows by one at a time.",
+   "run": {
+    "signature": {
+     "fn": "climbStairs",
+     "params": [
+      {
+       "name": "n",
+       "type": "int"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       1
+      ],
+      "expected": 1
+     },
+     {
+      "args": [
+       2
+      ],
+      "expected": 2
+     },
+     {
+      "args": [
+       3
+      ],
+      "expected": 3
+     },
+     {
+      "args": [
+       4
+      ],
+      "expected": 5
+     },
+     {
+      "args": [
+       5
+      ],
+      "expected": 8
+     },
+     {
+      "args": [
+       10
+      ],
+      "expected": 89
+     },
+     {
+      "args": [
+       30
+      ],
+      "expected": 1346269
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def climbStairs(self, n: int) -> int:",
+      "        a, b = 1, 1",
+      "        for _ in range(n - 1):",
+      "            «?»",
+      "        return b"
+     ],
+     "missing": [
+      "a, b = b, a + b"
+     ],
+     "accept": [
+      [
+       "b, a = a + b, b"
+      ]
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int climbStairs(int n) {",
+      "        int a = 1, b = 1;",
+      "        for (int i = 1; i < n; i++) {",
+      "            int next = a + b;",
+      "            «?»",
+      "            b = next;",
+      "        }",
+      "        return b;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "a = b;"
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int climbStairs(int n) {",
+      "        int a = 1, b = 1;",
+      "        for (int i = 1; i < n; i++) {",
+      "            int next = a + b;",
+      "            «?»",
+      "            b = next;",
+      "        }",
+      "        return b;",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "a = b;"
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-window-sum",
+   "kind": "leet",
+   "type": "missing",
+   "title": "A window that only grows",
+   "briefMd": "Return the largest sum of `k` consecutive elements of `nums` (`1 <= k <= len(nums)`).",
+   "similarLC": {
+    "number": 643,
+    "title": "Maximum Average Subarray I"
+   },
+   "tags": [
+    "sliding window"
+   ],
+   "explanationMd": "A fixed-size window slides one step at a time: add the element entering on the right and subtract the one leaving on the left, `nums[i - k]`. Without the subtraction `window` is just a running total of everything so far, not a window of size `k`.",
+   "run": {
+    "signature": {
+     "fn": "maxWindowSum",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      },
+      {
+       "name": "k",
+       "type": "int"
+      }
+     ],
+     "returns": "int"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        1,
+        12,
+        -5,
+        -6,
+        50,
+        3
+       ],
+       4
+      ],
+      "expected": 51
+     },
+     {
+      "args": [
+       [
+        5
+       ],
+       1
+      ],
+      "expected": 5
+     },
+     {
+      "args": [
+       [
+        1,
+        2,
+        3,
+        4
+       ],
+       2
+      ],
+      "expected": 7
+     },
+     {
+      "args": [
+       [
+        -1,
+        -2,
+        -3
+       ],
+       1
+      ],
+      "expected": -1
+     },
+     {
+      "args": [
+       [
+        4,
+        -10,
+        4
+       ],
+       2
+      ],
+      "expected": -6
+     },
+     {
+      "args": [
+       [
+        3,
+        3,
+        3,
+        3
+       ],
+       4
+      ],
+      "expected": 12
+     },
+     {
+      "args": [
+       [
+        2,
+        -1,
+        2,
+        -9,
+        1,
+        1
+       ],
+       3
+      ],
+      "expected": 3
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def maxWindowSum(self, nums: List[int], k: int) -> int:",
+      "        window = sum(nums[:k])",
+      "        best = window",
+      "        for i in range(k, len(nums)):",
+      "            window += nums[i]",
+      "            «?»",
+      "            best = max(best, window)",
+      "        return best"
+     ],
+     "missing": [
+      "window -= nums[i - k]"
+     ],
+     "accept": [
+      [
+       "window = window - nums[i - k]"
+      ]
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int maxWindowSum(int[] nums, int k) {",
+      "        int window = 0;",
+      "        for (int i = 0; i < k; i++) window += nums[i];",
+      "        int best = window;",
+      "        for (int i = k; i < nums.length; i++) {",
+      "            window += nums[i];",
+      "            «?»",
+      "            best = Math.max(best, window);",
+      "        }",
+      "        return best;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "window -= nums[i - k];"
+     ],
+     "accept": [
+      [
+       "window = window - nums[i - k];"
+      ]
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    int maxWindowSum(vector<int>& nums, int k) {",
+      "        int window = 0;",
+      "        for (int i = 0; i < k; i++) window += nums[i];",
+      "        int best = window;",
+      "        for (int i = k; i < (int)nums.size(); i++) {",
+      "            window += nums[i];",
+      "            «?»",
+      "            best = max(best, window);",
+      "        }",
+      "        return best;",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "window -= nums[i - k];"
+     ],
+     "accept": [
+      [
+       "window = window - nums[i - k];"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-move-zeroes",
+   "kind": "leet",
+   "type": "missing",
+   "title": "A write pointer that never moves",
+   "briefMd": "Move every 0 in `nums` to the end, keeping the order of the other values, in place. Return `nums`.",
+   "similarLC": {
+    "number": 283,
+    "title": "Move Zeroes"
+   },
+   "tags": [
+    "two pointers",
+    "arrays"
+   ],
+   "explanationMd": "`w` is where the next non-zero value goes. After each swap it has to move one slot right; otherwise every non-zero value is swapped into slot 0 and they end up shuffled: `[1, 2]` becomes `[2, 1]`.",
+   "run": {
+    "signature": {
+     "fn": "moveZeroes",
+     "params": [
+      {
+       "name": "nums",
+       "type": "int[]"
+      }
+     ],
+     "returns": "int[]"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       [
+        0,
+        1,
+        0,
+        3,
+        12
+       ]
+      ],
+      "expected": [
+       1,
+       3,
+       12,
+       0,
+       0
+      ]
+     },
+     {
+      "args": [
+       [
+        0
+       ]
+      ],
+      "expected": [
+       0
+      ]
+     },
+     {
+      "args": [
+       [
+        1,
+        2
+       ]
+      ],
+      "expected": [
+       1,
+       2
+      ]
+     },
+     {
+      "args": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "expected": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "args": [
+       [
+        4,
+        0,
+        5,
+        0,
+        0,
+        6
+       ]
+      ],
+      "expected": [
+       4,
+       5,
+       6,
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def moveZeroes(self, nums: List[int]) -> List[int]:",
+      "        w = 0",
+      "        for i in range(len(nums)):",
+      "            if nums[i] != 0:",
+      "                nums[w], nums[i] = nums[i], nums[w]",
+      "                «?»",
+      "        return nums"
+     ],
+     "missing": [
+      "w += 1"
+     ],
+     "accept": [
+      [
+       "w = w + 1"
+      ]
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public int[] moveZeroes(int[] nums) {",
+      "        int w = 0;",
+      "        for (int i = 0; i < nums.length; i++) {",
+      "            if (nums[i] != 0) {",
+      "                int t = nums[w];",
+      "                nums[w] = nums[i];",
+      "                nums[i] = t;",
+      "                «?»",
+      "            }",
+      "        }",
+      "        return nums;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "w++;"
+     ],
+     "accept": [
+      [
+       "w += 1;"
+      ],
+      [
+       "++w;"
+      ],
+      [
+       "w = w + 1;"
+      ]
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    vector<int> moveZeroes(vector<int>& nums) {",
+      "        int w = 0;",
+      "        for (int i = 0; i < (int)nums.size(); i++) {",
+      "            if (nums[i] != 0) {",
+      "                swap(nums[w], nums[i]);",
+      "                «?»",
+      "            }",
+      "        }",
+      "        return nums;",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "w++;"
+     ],
+     "accept": [
+      [
+       "w += 1;"
+      ],
+      [
+       "++w;"
+      ],
+      [
+       "w = w + 1;"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "dl-palindrome-pointers",
+   "kind": "leet",
+   "type": "missing",
+   "title": "Only one side moves",
+   "briefMd": "Return whether `s` reads the same forwards and backwards when you keep only letters and digits and ignore case.",
+   "similarLC": {
+    "number": 125,
+    "title": "Valid Palindrome"
+   },
+   "tags": [
+    "two pointers",
+    "strings"
+   ],
+   "explanationMd": "After a matching pair, **both** pointers move inward. Moving only `l` compares every later character with the same `s[r]`, so `\"aba\"` fails on `b` vs `a`.",
+   "run": {
+    "signature": {
+     "fn": "isPalindrome",
+     "params": [
+      {
+       "name": "s",
+       "type": "string"
+      }
+     ],
+     "returns": "bool"
+    },
+    "compare": "exact",
+    "tests": [
+     {
+      "args": [
+       "A man, a plan, a canal: Panama"
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "race a car"
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       " "
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "aba"
+      ],
+      "expected": true
+     },
+     {
+      "args": [
+       "ab"
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       "0P"
+      ],
+      "expected": false
+     },
+     {
+      "args": [
+       "Was it a car or a cat I saw?"
+      ],
+      "expected": true
+     }
+    ]
+   },
+   "code": {
+    "python3": {
+     "lines": [
+      "class Solution:",
+      "    def isPalindrome(self, s: str) -> bool:",
+      "        l, r = 0, len(s) - 1",
+      "        while l < r:",
+      "            if not s[l].isalnum():",
+      "                l += 1",
+      "            elif not s[r].isalnum():",
+      "                r -= 1",
+      "            else:",
+      "                if s[l].lower() != s[r].lower():",
+      "                    return False",
+      "                l += 1",
+      "                «?»",
+      "        return True"
+     ],
+     "missing": [
+      "r -= 1"
+     ],
+     "accept": [
+      [
+       "r = r - 1"
+      ]
+     ]
+    },
+    "java": {
+     "lines": [
+      "class Solution {",
+      "    public boolean isPalindrome(String s) {",
+      "        int l = 0, r = s.length() - 1;",
+      "        while (l < r) {",
+      "            char a = s.charAt(l), b = s.charAt(r);",
+      "            if (!Character.isLetterOrDigit(a)) {",
+      "                l++;",
+      "            } else if (!Character.isLetterOrDigit(b)) {",
+      "                r--;",
+      "            } else {",
+      "                if (Character.toLowerCase(a) != Character.toLowerCase(b)) return false;",
+      "                l++;",
+      "                «?»",
+      "            }",
+      "        }",
+      "        return true;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "r--;"
+     ],
+     "accept": [
+      [
+       "r -= 1;"
+      ],
+      [
+       "--r;"
+      ],
+      [
+       "r = r - 1;"
+      ]
+     ]
+    },
+    "cpp": {
+     "lines": [
+      "class Solution {",
+      "public:",
+      "    bool isPalindrome(string s) {",
+      "        int l = 0, r = (int)s.size() - 1;",
+      "        while (l < r) {",
+      "            unsigned char a = s[l], b = s[r];",
+      "            if (!isalnum(a)) {",
+      "                l++;",
+      "            } else if (!isalnum(b)) {",
+      "                r--;",
+      "            } else {",
+      "                if (tolower(a) != tolower(b)) return false;",
+      "                l++;",
+      "                «?»",
+      "            }",
+      "        }",
+      "        return true;",
+      "    }",
+      "};"
+     ],
+     "missing": [
+      "r--;"
+     ],
+     "accept": [
+      [
+       "r -= 1;"
+      ],
+      [
+       "--r;"
+      ],
+      [
+       "r = r - 1;"
+      ]
+     ]
+    }
+   }
+  }
+ ]
+}

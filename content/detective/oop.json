@@ -1,0 +1,1434 @@
+{
+  "kind": "oop",
+  "cases": [
+    {
+      "id": "oop-leaky-list",
+      "kind": "oop",
+      "type": "lines",
+      "title": "An order total that drifts",
+      "briefMd": "An order keeps a running total so checkout doesn't add up every item again. The cart page reads the items to show them.",
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ],
+      "explanationMd": "Returning the internal list hands callers the object itself, so `order.getItems().add(x)` or `.clear()` changes the items without touching `totalCents`, and the total drifts. That breaks **encapsulation**: a class can only keep its rule (the total equals the sum of the items) if every change goes through its own methods.\n\nReturn a read-only view (`Collections.unmodifiableList(items)`) or a copy (`List.copyOf(items)`). The same idea in Python is returning a tuple or a copy, and in C++ returning `const std::vector<Item>&`.",
+      "code": {
+        "java": {
+          "lines": [
+            "public class Order {",
+            "    private final List<Item> items = new ArrayList<>();",
+            "    private long totalCents = 0;",
+            "",
+            "    public void add(Item item) {",
+            "        items.add(item);",
+            "        totalCents += item.priceCents();",
+            "    }",
+            "",
+            "    public List<Item> getItems() {",
+            "        return items;",
+            "    }",
+            "",
+            "    public long totalCents() {",
+            "        return totalCents;",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            11
+          ],
+          "fixed": [
+            "public class Order {",
+            "    private final List<Item> items = new ArrayList<>();",
+            "    private long totalCents = 0;",
+            "",
+            "    public void add(Item item) {",
+            "        items.add(item);",
+            "        totalCents += item.priceCents();",
+            "    }",
+            "",
+            "    public List<Item> getItems() {",
+            "        return List.copyOf(items);",
+            "    }",
+            "",
+            "    public long totalCents() {",
+            "        return totalCents;",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-new-inside",
+      "kind": "oop",
+      "type": "lines",
+      "title": "A signup you can't test without email",
+      "briefMd": "Signs a user up and sends a welcome email. The team wants unit tests that run without a mail server, and a different email provider in staging.",
+      "tags": [
+        "solid",
+        "testing"
+      ],
+      "explanationMd": "The class builds its own `SmtpEmailSender`, pointed at the production host. Every test of `signUp` now sends real email (or fails without a network), and staging can't swap the provider without editing this class.\n\nDepend on the `EmailSender` **interface** and receive it through the constructor, exactly as `users` already is: that's **dependency injection**, the practical side of the dependency inversion principle (the D in SOLID). Tests pass a fake that records messages; staging and production pass their own senders.",
+      "code": {
+        "java": {
+          "lines": [
+            "public class SignupService {",
+            "    private final UserRepository users;",
+            "    private final EmailSender email = new SmtpEmailSender(\"smtp.prod.example.com\", 587);",
+            "",
+            "    public SignupService(UserRepository users) {",
+            "        this.users = users;",
+            "    }",
+            "",
+            "    public User signUp(String name, String address) {",
+            "        User u = users.save(new User(name, address));",
+            "        email.send(address, \"Welcome!\", \"Hi \" + name);",
+            "        return u;",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            3
+          ],
+          "fixed": [
+            "public class SignupService {",
+            "    private final UserRepository users;",
+            "    private final EmailSender email;",
+            "",
+            "    public SignupService(UserRepository users, EmailSender email) {",
+            "        this.users = users;",
+            "        this.email = email;",
+            "    }",
+            "",
+            "    public User signUp(String name, String address) {",
+            "        User u = users.save(new User(name, address));",
+            "        email.send(address, \"Welcome!\", \"Hi \" + name);",
+            "        return u;",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-ctor-override",
+      "kind": "oop",
+      "type": "lines",
+      "title": "A label that crashes while being built",
+      "briefMd": "A base `Widget` draws itself as soon as it's created. `new Label(\"hi\")` throws a NullPointerException.",
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ],
+      "explanationMd": "`Widget`'s constructor calls `render()`, which `Label` overrides. Java runs the base constructor *before* the subclass constructor body, so `Label.render()` runs while `text` is still `null`, and `text.toUpperCase()` throws.\n\nDon't call overridable methods from a constructor: finish building the object, then draw it (`new Label(\"hi\").show()`), or make the method `final` or `private`. C++ has the same trap in a different shape (a virtual call in a constructor runs the *base* version), and so does Python when a parent's `__init__` calls a method the child overrides.",
+      "code": {
+        "java": {
+          "lines": [
+            "abstract class Widget {",
+            "    Widget() {",
+            "        render();",
+            "    }",
+            "",
+            "    abstract void render();",
+            "}",
+            "",
+            "class Label extends Widget {",
+            "    private final String text;",
+            "",
+            "    Label(String text) {",
+            "        super();",
+            "        this.text = text;",
+            "    }",
+            "",
+            "    @Override",
+            "    void render() {",
+            "        System.out.println(\"[\" + text.toUpperCase() + \"]\");",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            3
+          ],
+          "fixed": [
+            "abstract class Widget {",
+            "    final void show() {",
+            "        render();",
+            "    }",
+            "",
+            "    abstract void render();",
+            "}",
+            "",
+            "class Label extends Widget {",
+            "    private final String text;",
+            "",
+            "    Label(String text) {",
+            "        super();",
+            "        this.text = text;",
+            "    }",
+            "",
+            "    @Override",
+            "    void render() {",
+            "        System.out.println(\"[\" + text.toUpperCase() + \"]\");",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-stack-extends-list",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A stack you can reach into",
+      "briefMd": "The undo stack of an editor: only the most recent action may be undone.",
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ],
+      "choices": [
+        "Extending `ArrayList` makes the stack *be* a list: callers can still call `add(0, x)`, `remove(3)` or `set(i, x)` and break last-in-first-out. Wrap a private list instead.",
+        "`pop()` is O(n) because `remove` shifts every element to the left.",
+        "It should extend `LinkedList`, because an `ArrayList` can't grow past its first capacity.",
+        "A generic class can't extend a concrete generic type like `ArrayList<T>`."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Inheritance says *a Stack is an ArrayList*, so every public list method comes along: `add(0, x)`, `remove(3)`, `set(i, x)`, `clear()`. Any caller can reorder or edit the middle of the history, and the stack can't stop it. (`java.util.Stack extends Vector` has exactly this flaw, which is why `ArrayDeque` is recommended instead.)\n\n**Favour composition over inheritance**: keep a private list and expose only push, pop and peek. Inherit when the child really can be used everywhere the parent is; reuse code by holding an object, not by becoming one.",
+      "code": {
+        "java": {
+          "lines": [
+            "public class Stack<T> extends ArrayList<T> {",
+            "    public void push(T x) {",
+            "        add(x);",
+            "    }",
+            "",
+            "    public T pop() {",
+            "        return remove(size() - 1);",
+            "    }",
+            "",
+            "    public T peek() {",
+            "        return get(size() - 1);",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            1
+          ],
+          "fixed": [
+            "public class Stack<T> {",
+            "    private final ArrayList<T> items = new ArrayList<>();",
+            "",
+            "    public void push(T x) {",
+            "        items.add(x);",
+            "    }",
+            "",
+            "    public T pop() {",
+            "        return items.remove(items.size() - 1);",
+            "    }",
+            "",
+            "    public T peek() {",
+            "        return items.get(items.size() - 1);",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-square-rectangle",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A square that won't stay a rectangle",
+      "briefMd": "Shapes for a layout engine. `stretch` resizes any rectangle it's given.",
+      "tags": [
+        "solid",
+        "oop"
+      ],
+      "choices": [
+        "`Square` breaks Liskov substitution: code written for `Rectangle` expects width and height to change independently, so `stretch(Square(3))` ends with area 25, not 50.",
+        "`Square.__init__` must call `super().__init__(side)` with a single argument.",
+        "`area` has to be a `@property`, or subclasses can't override it.",
+        "Python never calls a subclass's override from a parent-typed parameter, so `Square.set_width` is never used."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "The **Liskov substitution principle** (the L in SOLID): a subclass must work anywhere its parent is expected. Code written for `Rectangle` relies on \"setting the width leaves the height alone\", and `Square` can't keep that promise: `stretch(Square(3))` ends with a 5×5 square, area 25, and the assert fails.\n\nA square *is* a rectangle in geometry, but a **mutable** square isn't a substitute for a mutable rectangle. Make them siblings under a common `Shape`, or make shapes immutable so there are no setters to break.",
+      "code": {
+        "python3": {
+          "lines": [
+            "class Rectangle:",
+            "    def __init__(self, w, h):",
+            "        self.w, self.h = w, h",
+            "",
+            "    def set_width(self, w):",
+            "        self.w = w",
+            "",
+            "    def set_height(self, h):",
+            "        self.h = h",
+            "",
+            "    def area(self):",
+            "        return self.w * self.h",
+            "",
+            "",
+            "class Square(Rectangle):",
+            "    def __init__(self, side):",
+            "        super().__init__(side, side)",
+            "",
+            "    def set_width(self, w):",
+            "        self.w = self.h = w",
+            "",
+            "    def set_height(self, h):",
+            "        self.w = self.h = h",
+            "",
+            "",
+            "def stretch(r: Rectangle):",
+            "    r.set_width(10)",
+            "    r.set_height(5)",
+            "    assert r.area() == 50"
+          ],
+          "bad": [
+            14
+          ],
+          "fixed": [
+            "class Shape:",
+            "    def area(self):",
+            "        raise NotImplementedError",
+            "",
+            "",
+            "class Rectangle(Shape):",
+            "    def __init__(self, w, h):",
+            "        self.w, self.h = w, h",
+            "",
+            "    def set_width(self, w):",
+            "        self.w = w",
+            "",
+            "    def set_height(self, h):",
+            "        self.h = h",
+            "",
+            "    def area(self):",
+            "        return self.w * self.h",
+            "",
+            "",
+            "class Square(Shape):",
+            "    def __init__(self, side):",
+            "        self.side = side",
+            "",
+            "    def set_side(self, side):",
+            "        self.side = side",
+            "",
+            "    def area(self):",
+            "        return self.side * self.side",
+            "",
+            "",
+            "def stretch(r: Rectangle):",
+            "    r.set_width(10)",
+            "    r.set_height(5)",
+            "    assert r.area() == 50"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-type-switch",
+      "kind": "oop",
+      "type": "choice",
+      "title": "Every new shape edits the same functions",
+      "briefMd": "Geometry helpers for a drawing app that adds a shape every sprint. Triangles are next.",
+      "tags": [
+        "solid",
+        "oop"
+      ],
+      "choices": [
+        "Adding a shape means editing every `isinstance` chain, and a missed one only fails at runtime. Give each shape its own `area()` and `perimeter()` methods instead (polymorphism, open/closed).",
+        "`isinstance` doesn't work for classes defined in the same module; compare `type(shape).__name__` instead.",
+        "3.14159 isn't precise enough, so areas are wrong in the third decimal.",
+        "The functions should return `None` for unknown shapes instead of raising `TypeError`."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Each function asks \"which kind of shape is this?\" and handles every kind itself. Adding `Triangle` means finding and editing every such chain (area, perimeter, and whatever comes later), and a missed one only fails at runtime with `TypeError`.\n\nThe **open/closed principle**: code should be open for extension (add a class) and closed for modification (no edits to working code). Put the behaviour on the shapes, so each class implements `area()` and `perimeter()` (**polymorphism**), and adding a triangle touches nothing else. (`math.pi` is nicer than 3.14159, but that's not the design problem.)",
+      "code": {
+        "python3": {
+          "lines": [
+            "class Circle:",
+            "    def __init__(self, r):",
+            "        self.r = r",
+            "",
+            "",
+            "class Square:",
+            "    def __init__(self, side):",
+            "        self.side = side",
+            "",
+            "",
+            "def area(shape):",
+            "    if isinstance(shape, Circle):",
+            "        return 3.14159 * shape.r ** 2",
+            "    elif isinstance(shape, Square):",
+            "        return shape.side ** 2",
+            "    raise TypeError(f\"unknown shape {shape!r}\")",
+            "",
+            "",
+            "def perimeter(shape):",
+            "    if isinstance(shape, Circle):",
+            "        return 2 * 3.14159 * shape.r",
+            "    elif isinstance(shape, Square):",
+            "        return 4 * shape.side",
+            "    raise TypeError(f\"unknown shape {shape!r}\")"
+          ],
+          "bad": [
+            11,
+            19
+          ],
+          "fixed": [
+            "import math",
+            "",
+            "",
+            "class Shape:",
+            "    def area(self):",
+            "        raise NotImplementedError",
+            "",
+            "    def perimeter(self):",
+            "        raise NotImplementedError",
+            "",
+            "",
+            "class Circle(Shape):",
+            "    def __init__(self, r):",
+            "        self.r = r",
+            "",
+            "    def area(self):",
+            "        return math.pi * self.r ** 2",
+            "",
+            "    def perimeter(self):",
+            "        return 2 * math.pi * self.r",
+            "",
+            "",
+            "class Square(Shape):",
+            "    def __init__(self, side):",
+            "        self.side = side",
+            "",
+            "    def area(self):",
+            "        return self.side ** 2",
+            "",
+            "    def perimeter(self):",
+            "        return 4 * self.side"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-strategy-payments",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A checkout that knows every wallet",
+      "briefMd": "Takes payment for an order. Apple Pay and bank transfers are on the roadmap.",
+      "tags": [
+        "design patterns",
+        "solid"
+      ],
+      "choices": [
+        "Each new payment method edits `Checkout`, and every branch builds its own client so none can be swapped in tests. Use a `PaymentMethod` interface with one class per method (Strategy), looked up by name.",
+        "Comparing strings with `equals` is too slow for a checkout path; use `==`.",
+        "`IllegalArgumentException` is unchecked, so callers won't know they have to catch it.",
+        "The method should be `static`, because `Checkout` has no fields."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Every payment method lives inside `Checkout`: adding Apple Pay means editing this method again, re-testing all the others, and each branch builds its own client, so none of them can be replaced by a fake in tests.\n\nThis is what the **Strategy** pattern is for: one `PaymentMethod` interface, one class per method (card, PayPal, gift card), and `Checkout` picks one by name from a map it's given. New methods are new classes; `Checkout` doesn't change (open/closed). A **factory** can build the map from configuration.",
+      "code": {
+        "java": {
+          "lines": [
+            "public class Checkout {",
+            "    public Receipt pay(Order order, String method) {",
+            "        if (method.equals(\"card\")) {",
+            "            CardGateway g = new CardGateway();",
+            "            return g.charge(order.cardToken(), order.totalCents());",
+            "        } else if (method.equals(\"paypal\")) {",
+            "            PayPalClient p = new PayPalClient();",
+            "            return p.capture(order.paypalId(), order.totalCents());",
+            "        } else if (method.equals(\"giftcard\")) {",
+            "            return GiftCards.redeem(order.giftCode(), order.totalCents());",
+            "        }",
+            "        throw new IllegalArgumentException(\"unknown method \" + method);",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            3,
+            6,
+            9
+          ],
+          "fixed": [
+            "public interface PaymentMethod {",
+            "    Receipt pay(Order order);",
+            "}",
+            "",
+            "public class Checkout {",
+            "    private final Map<String, PaymentMethod> methods;",
+            "",
+            "    public Checkout(Map<String, PaymentMethod> methods) {",
+            "        this.methods = methods;",
+            "    }",
+            "",
+            "    public Receipt pay(Order order, String method) {",
+            "        PaymentMethod m = methods.get(method);",
+            "        if (m == null) throw new IllegalArgumentException(\"unknown method \" + method);",
+            "        return m.pay(order);",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-observer-leak",
+      "kind": "oop",
+      "type": "missing",
+      "title": "Widgets that never go away",
+      "briefMd": "A dashboard opens and closes many `PriceWidget`s, all listening to one app-wide `PriceFeed` (it has `addListener` and `removeListener`). After a day, memory keeps growing and closed widgets still print prices.",
+      "tags": [
+        "design patterns",
+        "memory"
+      ],
+      "explanationMd": "The classic **Observer** pitfall, the *lapsed listener*. The feed lives as long as the app and keeps a reference to every widget that subscribed, so a closed widget can never be garbage-collected and keeps receiving updates.\n\nWhatever subscribes must unsubscribe: `close()` calls `feed.removeListener(this)`. Other fixes are a `Subscription` handle returned by `addListener` with a `cancel()` method, or weak references in the subject.",
+      "code": {
+        "java": {
+          "lines": [
+            "public class PriceWidget implements PriceListener {",
+            "    private final PriceFeed feed;",
+            "    private final String symbol;",
+            "",
+            "    public PriceWidget(PriceFeed feed, String symbol) {",
+            "        this.feed = feed;",
+            "        this.symbol = symbol;",
+            "        feed.addListener(this);",
+            "    }",
+            "",
+            "    @Override",
+            "    public void onPrice(String sym, double price) {",
+            "        if (sym.equals(symbol)) System.out.println(symbol + \": \" + price);",
+            "    }",
+            "",
+            "    public void close() {",
+            "        «?»",
+            "    }",
+            "}"
+          ],
+          "missing": [
+            "feed.removeListener(this);"
+          ],
+          "accept": [
+            [
+              "this.feed.removeListener(this);"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-decorator-forward",
+      "kind": "oop",
+      "type": "missing",
+      "title": "A store that forgets every write",
+      "briefMd": "Production wraps the real key-value store in a `LoggingStore` to trace calls. Since it shipped, a value written a moment ago reads back as missing.",
+      "tags": [
+        "design patterns"
+      ],
+      "explanationMd": "A **decorator** adds behaviour around another object with the same interface, and it has to pass every call on to the object it wraps. `put` logs and stops there, so writes never reach the real store.\n\nForward the call: `self.inner.put(key, value)`. When an interface has many methods it's easy to miss one; a base decorator that forwards everything by default (or `__getattr__` delegation in Python) means each decorator only overrides what it changes.",
+      "code": {
+        "python3": {
+          "lines": [
+            "class Store:",
+            "    def get(self, key): ...",
+            "    def put(self, key, value): ...",
+            "",
+            "",
+            "class LoggingStore(Store):",
+            "    \"\"\"Wraps another store and logs every call (a decorator).\"\"\"",
+            "",
+            "    def __init__(self, inner: Store, log):",
+            "        self.inner = inner",
+            "        self.log = log",
+            "",
+            "    def get(self, key):",
+            "        self.log(f\"get {key}\")",
+            "        return self.inner.get(key)",
+            "",
+            "    def put(self, key, value):",
+            "        self.log(f\"put {key}\")",
+            "        «?»"
+          ],
+          "missing": [
+            "self.inner.put(key, value)"
+          ],
+          "accept": [
+            [
+              "return self.inner.put(key, value)"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-command-undo",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Undo that wipes the page",
+      "briefMd": "A text editor built on commands so every action can be undone. Type \"ab\", then \"c\", press undo, and the whole document is gone.",
+      "tags": [
+        "design patterns"
+      ],
+      "explanationMd": "In the **Command** pattern each command knows how to do and undo exactly its own change. `InsertText.undo` resets the whole document instead of removing the text it added, so undoing the last keystroke erases everything typed before it.\n\nRemove only what was appended: `self.doc.text = self.doc.text[: len(self.doc.text) - len(self.s)]`. When the inverse isn't easy to compute (deleting a selection, reformatting), the command saves what it needs during `execute` (a small **memento**) and restores it in `undo`.",
+      "code": {
+        "python3": {
+          "lines": [
+            "class Document:",
+            "    def __init__(self):",
+            "        self.text = \"\"",
+            "",
+            "",
+            "class InsertText:",
+            "    \"\"\"Command: append `s`; undo removes it again.\"\"\"",
+            "",
+            "    def __init__(self, doc, s):",
+            "        self.doc, self.s = doc, s",
+            "",
+            "    def execute(self):",
+            "        self.doc.text += self.s",
+            "",
+            "    def undo(self):",
+            "        self.doc.text = \"\"",
+            "",
+            "",
+            "class Editor:",
+            "    def __init__(self, doc):",
+            "        self.doc, self.history = doc, []",
+            "",
+            "    def run(self, cmd):",
+            "        cmd.execute()",
+            "        self.history.append(cmd)",
+            "",
+            "    def undo(self):",
+            "        if self.history:",
+            "            self.history.pop().undo()"
+          ],
+          "bad": [
+            16
+          ],
+          "fixed": [
+            "class Document:",
+            "    def __init__(self):",
+            "        self.text = \"\"",
+            "",
+            "",
+            "class InsertText:",
+            "    \"\"\"Command: append `s`; undo removes it again.\"\"\"",
+            "",
+            "    def __init__(self, doc, s):",
+            "        self.doc, self.s = doc, s",
+            "",
+            "    def execute(self):",
+            "        self.doc.text += self.s",
+            "",
+            "    def undo(self):",
+            "        self.doc.text = self.doc.text[: len(self.doc.text) - len(self.s)]",
+            "",
+            "",
+            "class Editor:",
+            "    def __init__(self, doc):",
+            "        self.doc, self.history = doc, []",
+            "",
+            "    def run(self, cmd):",
+            "        cmd.execute()",
+            "        self.history.append(cmd)",
+            "",
+            "    def undo(self):",
+            "        if self.history:",
+            "            self.history.pop().undo()"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-builder",
+      "kind": "oop",
+      "type": "choice",
+      "title": "Which number was the timeout?",
+      "briefMd": "An HTTP client with sensible defaults. In production, calls to the API time out after 3 seconds and are retried 30 times.",
+      "tags": [
+        "design patterns",
+        "api design"
+      ],
+      "choices": [
+        "Telescoping constructors: five positional arguments with two `int`s and two `boolean`s side by side, so swapping timeout and retries still compiles. A Builder with named steps makes each value say what it is.",
+        "A Java constructor can't call another constructor with `this(...)`.",
+        "The class needs a no-argument constructor so frameworks can create it.",
+        "The `boolean` parameters should be `Boolean`, so callers can pass `null` for the default."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "These are **telescoping constructors**: each overload adds a parameter, and the full one takes five positional arguments, two `int`s and two `boolean`s next to each other. The caller swapped timeout and retries, and it compiles fine. Defaults are also repeated across overloads.\n\nA **Builder** names every value at the call site (`.timeoutSec(30).retries(3)`), keeps defaults in one place, and lets you add options without new constructors. (Java records and Python keyword arguments solve the same problem in other ways.)",
+      "code": {
+        "java": {
+          "lines": [
+            "public class HttpClient {",
+            "    public HttpClient(String baseUrl) {",
+            "        this(baseUrl, 30, 3);",
+            "    }",
+            "",
+            "    public HttpClient(String baseUrl, int timeoutSec) {",
+            "        this(baseUrl, timeoutSec, 3);",
+            "    }",
+            "",
+            "    public HttpClient(String baseUrl, int timeoutSec, int retries) {",
+            "        this(baseUrl, timeoutSec, retries, true, false);",
+            "    }",
+            "",
+            "    public HttpClient(String baseUrl, int timeoutSec, int retries, boolean followRedirects, boolean gzip) {",
+            "        // ...",
+            "    }",
+            "}",
+            "",
+            "// elsewhere:",
+            "HttpClient c = new HttpClient(\"https://api.example.com\", 3, 30, false, true);"
+          ],
+          "bad": [
+            20
+          ],
+          "fixed": [
+            "public class HttpClient {",
+            "    public static Builder builder(String baseUrl) {",
+            "        return new Builder(baseUrl);",
+            "    }",
+            "",
+            "    public static class Builder {",
+            "        private final String baseUrl;",
+            "        private int timeoutSec = 30, retries = 3;",
+            "        private boolean followRedirects = true, gzip = false;",
+            "",
+            "        Builder(String baseUrl) { this.baseUrl = baseUrl; }",
+            "        public Builder timeoutSec(int s) { timeoutSec = s; return this; }",
+            "        public Builder retries(int n) { retries = n; return this; }",
+            "        public Builder followRedirects(boolean f) { followRedirects = f; return this; }",
+            "        public Builder gzip(boolean g) { gzip = g; return this; }",
+            "        public HttpClient build() { return new HttpClient(this); }",
+            "    }",
+            "",
+            "    private HttpClient(Builder b) {",
+            "        // ...",
+            "    }",
+            "}",
+            "",
+            "// elsewhere:",
+            "HttpClient c = HttpClient.builder(\"https://api.example.com\")",
+            "        .timeoutSec(30).retries(3)",
+            "        .followRedirects(false).gzip(true)",
+            "        .build();"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-singleton-ctor",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Read once, read everywhere",
+      "briefMd": "Configuration is meant to be read from disk once and shared through `AppConfig.get()`. Profiling shows `app.properties` being read hundreds of times a minute.",
+      "tags": [
+        "design patterns"
+      ],
+      "explanationMd": "A **Singleton** only works if nobody else can create the object. With a public constructor, any code can write `new AppConfig()`, and each one reads the file again and holds its own copy, which is exactly what the profile shows.\n\nMake the constructor `private` so `get()` is the only way in. Then consider whether it should be a singleton at all: global state hides dependencies and makes tests share configuration. Many teams create one `AppConfig` at startup and pass it to whoever needs it (dependency injection).",
+      "code": {
+        "java": {
+          "lines": [
+            "public class AppConfig {",
+            "    private static final AppConfig INSTANCE = new AppConfig();",
+            "    private final Properties props = new Properties();",
+            "",
+            "    public AppConfig() {",
+            "        try (InputStream in = new FileInputStream(\"app.properties\")) {",
+            "            props.load(in);",
+            "        } catch (IOException e) {",
+            "            throw new UncheckedIOException(e);",
+            "        }",
+            "    }",
+            "",
+            "    public static AppConfig get() {",
+            "        return INSTANCE;",
+            "    }",
+            "",
+            "    public String value(String key) {",
+            "        return props.getProperty(key);",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            5
+          ],
+          "fixed": [
+            "public class AppConfig {",
+            "    private static final AppConfig INSTANCE = new AppConfig();",
+            "    private final Properties props = new Properties();",
+            "",
+            "    private AppConfig() {",
+            "        try (InputStream in = new FileInputStream(\"app.properties\")) {",
+            "            props.load(in);",
+            "        } catch (IOException e) {",
+            "            throw new UncheckedIOException(e);",
+            "        }",
+            "    }",
+            "",
+            "    public static AppConfig get() {",
+            "        return INSTANCE;",
+            "    }",
+            "",
+            "    public String value(String key) {",
+            "        return props.getProperty(key);",
+            "    }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-fat-interface",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A printer that has to pretend to fax",
+      "briefMd": "Drivers for office devices. Most models only print; a few also scan and fax.",
+      "tags": [
+        "solid"
+      ],
+      "choices": [
+        "One fat interface makes every device implement features it doesn't have, so callers only find out at runtime. Split it into small interfaces (Printer, Scanner, Fax) and implement just what each device supports.",
+        "Interface methods can't take two parameters, so `fax` won't compile.",
+        "`UnsupportedOperationException` is a checked exception, so every caller must catch it.",
+        "`BasicPrinter` has to be `abstract`, because it doesn't support every method."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "One large interface forces every device to implement everything, so `BasicPrinter` \"supports\" scanning and faxing by throwing. Callers can't tell from the type what will work; they find out at runtime.\n\nThe **interface segregation principle** (the I in SOLID): many small interfaces beat one big one. Split it into `Printer`, `DocScanner` and `Fax`, and let each device implement only what it can do. A method that needs to fax takes a `Fax`, and the compiler stops you passing a plain printer.",
+      "code": {
+        "java": {
+          "lines": [
+            "public interface OfficeMachine {",
+            "    void print(Document d);",
+            "    void scan(Document d);",
+            "    void fax(Document d, String number);",
+            "    void staple(Document d);",
+            "}",
+            "",
+            "public class BasicPrinter implements OfficeMachine {",
+            "    public void print(Document d) { /* send to the print head */ }",
+            "",
+            "    public void scan(Document d) {",
+            "        throw new UnsupportedOperationException(\"no scanner\");",
+            "    }",
+            "",
+            "    public void fax(Document d, String number) {",
+            "        throw new UnsupportedOperationException(\"no fax\");",
+            "    }",
+            "",
+            "    public void staple(Document d) {",
+            "        throw new UnsupportedOperationException(\"no stapler\");",
+            "    }",
+            "}"
+          ],
+          "bad": [
+            1
+          ],
+          "fixed": [
+            "public interface Printer {",
+            "    void print(Document d);",
+            "}",
+            "",
+            "public interface DocScanner {",
+            "    void scan(Document d);",
+            "}",
+            "",
+            "public interface Fax {",
+            "    void fax(Document d, String number);",
+            "}",
+            "",
+            "public class BasicPrinter implements Printer {",
+            "    public void print(Document d) { /* send to the print head */ }",
+            "}",
+            "",
+            "public class OfficeHub implements Printer, DocScanner, Fax {",
+            "    public void print(Document d) { /* ... */ }",
+            "    public void scan(Document d) { /* ... */ }",
+            "    public void fax(Document d, String number) { /* ... */ }",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-class-attribute",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Everyone's cart has everything",
+      "briefMd": "One `Cart` per signed-in user. After launch, users see items they never added.",
+      "tags": [
+        "oop",
+        "python"
+      ],
+      "explanationMd": "Names assigned in the class body belong to the **class**, so they're shared by every instance. `self.items.append(...)` finds the single class-level list and changes it for every cart.\n\nPer-object state belongs in `__init__` (`self.items = []`). `discount = 0` is harmless: numbers can't be changed in place, and `self.discount = 5` creates an attribute on that one cart. Java and C++ make the same distinction explicit with `static`.",
+      "code": {
+        "python3": {
+          "lines": [
+            "class Cart:",
+            "    items = []",
+            "    discount = 0",
+            "",
+            "    def __init__(self, user):",
+            "        self.user = user",
+            "",
+            "    def add(self, item):",
+            "        self.items.append(item)",
+            "",
+            "    def total(self):",
+            "        return sum(i.price for i in self.items) - self.discount"
+          ],
+          "bad": [
+            2
+          ],
+          "fixed": [
+            "class Cart:",
+            "    discount = 0",
+            "",
+            "    def __init__(self, user):",
+            "        self.user = user",
+            "        self.items = []",
+            "",
+            "    def add(self, item):",
+            "        self.items.append(item)",
+            "",
+            "    def total(self):",
+            "        return sum(i.price for i in self.items) - self.discount"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-virtual-dtor",
+      "kind": "oop",
+      "type": "missing",
+      "title": "Half a sensor gets cleaned up",
+      "briefMd": "Every call to `poll()` leaks 2 MB, although `Camera` frees its buffer in its destructor.",
+      "tags": [
+        "oop",
+        "memory"
+      ],
+      "explanationMd": "Deleting a `Camera` through a `Sensor*` only runs `~Camera` if `Sensor`'s destructor is **virtual**; otherwise it's undefined behaviour, and in practice only the base part is destroyed, so the frame buffer leaks.\n\nA class meant to be used through a base pointer needs `virtual ~Sensor() = default;`. Better still, let members clean up after themselves: hold the buffer in a `std::vector<unsigned char>` and the sensor in a `std::unique_ptr<Sensor>`, and no hand-written destructor or `delete` is needed (RAII).",
+      "code": {
+        "cpp": {
+          "lines": [
+            "class Sensor {",
+            "public:",
+            "    «?»",
+            "    virtual double read() = 0;",
+            "};",
+            "",
+            "class Camera : public Sensor {",
+            "public:",
+            "    Camera() : frame_(new unsigned char[1920 * 1080]) {}",
+            "    ~Camera() { delete[] frame_; }",
+            "    double read() override { return frame_[0]; }",
+            "",
+            "private:",
+            "    unsigned char* frame_;",
+            "};",
+            "",
+            "void poll() {",
+            "    Sensor* s = new Camera();",
+            "    s->read();",
+            "    delete s;",
+            "}"
+          ],
+          "missing": [
+            "virtual ~Sensor() = default;"
+          ],
+          "accept": [
+            [
+              "virtual ~Sensor() {}"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "oop-slicing",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Every animal says \"...\"",
+      "briefMd": "A zoo of animals, each with its own sound. The program prints \"...\" twice.",
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ],
+      "explanationMd": "`std::vector<Animal>` stores `Animal` **values**. `push_back(Dog{})` copies only the `Animal` part of the dog into the vector (**object slicing**), so the stored objects really are plain Animals and `sound()` returns \"...\".\n\nPolymorphism in C++ needs a pointer or reference to the real object: store `std::unique_ptr<Animal>` (or another smart pointer) and create each animal with `std::make_unique<Dog>()`. Java and Python never slice, because every object variable there is already a reference.",
+      "code": {
+        "cpp": {
+          "lines": [
+            "#include <iostream>",
+            "#include <string>",
+            "#include <vector>",
+            "",
+            "struct Animal {",
+            "    virtual ~Animal() = default;",
+            "    virtual std::string sound() const { return \"...\"; }",
+            "};",
+            "",
+            "struct Dog : Animal {",
+            "    std::string sound() const override { return \"Woof\"; }",
+            "};",
+            "",
+            "struct Cat : Animal {",
+            "    std::string sound() const override { return \"Meow\"; }",
+            "};",
+            "",
+            "int main() {",
+            "    std::vector<Animal> zoo;",
+            "    zoo.push_back(Dog{});",
+            "    zoo.push_back(Cat{});",
+            "    for (const Animal& a : zoo) std::cout << a.sound() << \"\\n\";",
+            "}"
+          ],
+          "bad": [
+            19
+          ],
+          "fixed": [
+            "#include <iostream>",
+            "#include <memory>",
+            "#include <string>",
+            "#include <vector>",
+            "",
+            "struct Animal {",
+            "    virtual ~Animal() = default;",
+            "    virtual std::string sound() const { return \"...\"; }",
+            "};",
+            "",
+            "struct Dog : Animal {",
+            "    std::string sound() const override { return \"Woof\"; }",
+            "};",
+            "",
+            "struct Cat : Animal {",
+            "    std::string sound() const override { return \"Meow\"; }",
+            "};",
+            "",
+            "int main() {",
+            "    std::vector<std::unique_ptr<Animal>> zoo;",
+            "    zoo.push_back(std::make_unique<Dog>());",
+            "    zoo.push_back(std::make_unique<Cat>());",
+            "    for (const auto& a : zoo) std::cout << a->sound() << \"\\n\";",
+            "}"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ood-parking-lot",
+      "kind": "oop",
+      "type": "lines",
+      "title": "A car that parks itself",
+      "briefMd": "Object-oriented design for a multi-level parking garage: motorcycles, cars and vans, spots in three sizes, pay by card on exit. The interviewer will add EV charging spots next.",
+      "tags": [
+        "object-oriented design",
+        "oop"
+      ],
+      "explanationMd": "`Vehicle.park()` gives a car four jobs: searching the garage, managing spot state, taking payment and printing tickets. A vehicle shouldn't know how the garage is laid out or how payments work (**single responsibility**, low coupling), and charging at entry duplicates the payment that `exit` already does.\n\nThe lot owns its spots, so `ParkingLot.park(vehicle)` finds and reserves a spot and returns a Ticket; payment stays in one place. Adding EV spots then means a new spot type and a change to the lot's search, with every vehicle class untouched.",
+      "doc": {
+        "lines": [
+          "Classes: ParkingLot has Levels; a Level has ParkingSpots; Motorcycle, Car and Van are subclasses of Vehicle.",
+          "Spots: a ParkingSpot has a size (SMALL, MEDIUM, LARGE) and the vehicle parked in it, if any.",
+          "Fit: Vehicle.canFitIn(spot) compares the vehicle's size with the spot's size.",
+          "Parking: Vehicle.park() searches every level for a free spot, marks it taken, charges the driver's card and prints the ticket.",
+          "Tickets: a Ticket records the spot, the vehicle and the entry time.",
+          "Exit: ParkingLot.exit(ticket) frees the spot and asks the PaymentService for the fee.",
+          "Pricing: a PricingPolicy turns the length of stay and the vehicle type into a fee, so rates change without touching the lot.",
+          "Signs: each Level keeps a count of free spots per size for the entrance displays."
+        ],
+        "bad": [
+          4
+        ],
+        "fixed": [
+          "Classes: ParkingLot has Levels; a Level has ParkingSpots; Motorcycle, Car and Van are subclasses of Vehicle.",
+          "Spots: a ParkingSpot has a size (SMALL, MEDIUM, LARGE) and the vehicle parked in it, if any.",
+          "Fit: Vehicle.canFitIn(spot) compares the vehicle's size with the spot's size.",
+          "Parking: ParkingLot.park(vehicle) asks each level for a free spot that fits, marks it taken and returns a Ticket; payment happens at exit.",
+          "Tickets: a Ticket records the spot, the vehicle and the entry time.",
+          "Exit: ParkingLot.exit(ticket) frees the spot and asks the PaymentService for the fee.",
+          "Pricing: a PricingPolicy turns the length of stay and the vehicle type into a fee, so rates change without touching the lot.",
+          "Signs: each Level keeps a count of free spots per size for the entrance displays."
+        ]
+      }
+    },
+    {
+      "id": "ood-vending-machine",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Sixteen ways to be in four states",
+      "briefMd": "A vending machine: insert coins, pick a product, get the product and change. It can be sold out or in maintenance. The interviewer will add card payments (with a \"waiting for the bank\" state) next.",
+      "tags": [
+        "design patterns",
+        "object-oriented design"
+      ],
+      "explanationMd": "Four booleans allow 16 combinations, most of them meaningless (dispensing *and* in maintenance?), and every method needs an if/else ladder that has to stay consistent as features arrive. Adding \"waiting for the bank\" means a fifth flag and edits everywhere.\n\nThe **State** pattern makes each state a class that decides what each action does and which state comes next. Illegal combinations can't exist, and card payments become one new state class instead of changes to every method.",
+      "doc": {
+        "lines": [
+          "Inventory: a map from slot code to Slot (product, price, count).",
+          "Money: a CoinBox holds the inserted coins and makes change with the fewest coins.",
+          "State: four booleans (hasCoins, isDispensing, isSoldOut, inMaintenance); every method checks combinations of them with if/else.",
+          "Selecting: select(code) checks the slot exists, the inserted money covers the price and the count is above zero.",
+          "Dispensing: lowers the slot's count, drops the product and returns change from the CoinBox.",
+          "Cancelling: cancel() returns the inserted coins.",
+          "Admin: refill(code, n) and collectCash() are only allowed in maintenance.",
+          "Events: each sale is logged with time, slot and amount for daily reports."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Inventory: a map from slot code to Slot (product, price, count).",
+          "Money: a CoinBox holds the inserted coins and makes change with the fewest coins.",
+          "State: one State object at a time (Idle, HasMoney, Dispensing, SoldOut, Maintenance); each handles insert, select and cancel and returns the next state.",
+          "Selecting: select(code) checks the slot exists, the inserted money covers the price and the count is above zero.",
+          "Dispensing: lowers the slot's count, drops the product and returns change from the CoinBox.",
+          "Cancelling: cancel() returns the inserted coins.",
+          "Admin: refill(code, n) and collectCash() are only allowed in maintenance.",
+          "Events: each sale is logged with time, slot and amount for daily reports."
+        ]
+      }
+    },
+    {
+      "id": "ood-library",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Only one person can read Dune",
+      "briefMd": "A library system: members search the catalogue, borrow up to 5 items for 3 weeks, reserve items that are out and pay late fees. Popular books have several copies.",
+      "tags": [
+        "object-oriented design"
+      ],
+      "explanationMd": "Putting the borrower and due date on `Book` mixes up the *title* with the physical *copy*. With three copies of *Dune* there is still a single `borrower` field, so only one person can have it, and the loan history disappears when it comes back.\n\nSeparate the catalogue entry (Book) from the items on the shelf (BookCopy), and record each borrowing as its own object (Loan). This split between a kind of thing and its instances comes up in most OOD interviews: movies and showings, flights and seats, products and stock items.",
+      "doc": {
+        "lines": [
+          "Catalogue: Book has isbn, title, authors, the borrower and the due date.",
+          "Members: Member has an id, name, contact details and a list of current loans.",
+          "Search: a Catalogue indexes books by title, author and subject.",
+          "Borrowing: borrow(member, book) checks the member has fewer than 5 loans and the book is available.",
+          "Reservations: a queue per book; when a copy comes back, the first member in line has 2 days to collect it.",
+          "Fines: a FinePolicy computes the late fee from the due date and the return date.",
+          "Notifications: a Notifier sends due-date reminders and reservation alerts by email or SMS."
+        ],
+        "bad": [
+          1
+        ],
+        "fixed": [
+          "Catalogue: Book (isbn, title, authors) has several BookCopy objects (barcode, shelf, status); a Loan links one copy, one member and a due date.",
+          "Members: Member has an id, name, contact details and a list of current loans.",
+          "Search: a Catalogue indexes books by title, author and subject.",
+          "Borrowing: borrow(member, book) checks the member has fewer than 5 loans and the book is available.",
+          "Reservations: a queue per book; when a copy comes back, the first member in line has 2 days to collect it.",
+          "Fines: a FinePolicy computes the late fee from the due date and the return date.",
+          "Notifications: a Notifier sends due-date reminders and reservation alerts by email or SMS."
+        ]
+      }
+    },
+    {
+      "id": "ood-notifications",
+      "kind": "oop",
+      "type": "choice",
+      "title": "WhatsApp means editing everything",
+      "briefMd": "A notification service: users choose email, SMS or push for each kind of notification. Product wants WhatsApp and Slack next quarter.",
+      "tags": [
+        "design patterns",
+        "solid"
+      ],
+      "choices": [
+        "Every new channel means editing NotificationService (a new branch and a new method). Define a Channel interface with one class per provider and look them up in a registry.",
+        "Templates should be rendered after the retries, so a retry can pick up a newer template.",
+        "Quiet hours should apply to urgent notifications too, for consistency.",
+        "Preferences should be per user only, not per notification type, to keep the table small."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Branching on the channel name puts every provider's details in one class. Each new channel edits `NotificationService`, its tests grow with every provider, and a bug in the SMS branch can ship with the WhatsApp change.\n\nMake channels pluggable (the **Strategy** pattern, open/closed principle): a `Channel` interface with one class per provider, registered by name. WhatsApp becomes one new class plus a registry entry, while retries, quiet hours and auditing stay shared.",
+      "doc": {
+        "lines": [
+          "API: notify(userId, type, message) is called by other services.",
+          "Preferences: a PreferenceStore maps (user, notification type) to the channels the user turned on.",
+          "Sending: NotificationService.send() checks each channel name with if/else and calls its own sendEmail, sendSms or sendPush method.",
+          "Templates: messages are rendered from a template per type and language before sending.",
+          "Retries: failed sends are retried 3 times with backoff, then recorded as failed.",
+          "Quiet hours: non-urgent notifications wait until 8 am in the user's time zone.",
+          "Audit: every attempt is logged with user, type, channel and result."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "API: notify(userId, type, message) is called by other services.",
+          "Preferences: a PreferenceStore maps (user, notification type) to the channels the user turned on.",
+          "Sending: each channel implements a Channel interface (EmailChannel, SmsChannel, PushChannel); the service looks channels up by name in a registry.",
+          "Templates: messages are rendered from a template per type and language before sending.",
+          "Retries: failed sends are retried 3 times with backoff, then recorded as failed.",
+          "Quiet hours: non-urgent notifications wait until 8 am in the user's time zone.",
+          "Audit: every attempt is logged with user, type, channel and result."
+        ]
+      }
+    },
+    {
+      "id": "ood-chess",
+      "kind": "oop",
+      "type": "lines",
+      "title": "A king that inherits queen moves",
+      "briefMd": "Object-oriented design for a two-player chess game with move validation, check detection and undo.",
+      "tags": [
+        "oop",
+        "solid"
+      ],
+      "explanationMd": "Inheriting just to reuse code makes false claims: a King *is not* a Queen, so anything written for queens is wrong for kings (**Liskov substitution**), and changing how queens move silently changes kings too (the fragile base class problem).\n\nShare behaviour without inheritance: a `slide` helper with direction lists, used by Rook, Bishop and Queen, and fixed step lists for King and Knight. Each piece stays a direct subclass of `Piece`.",
+      "doc": {
+        "lines": [
+          "Board: an 8×8 grid of Squares; each holds a Piece or nothing.",
+          "Pieces: an abstract Piece with a colour and legalMoves(board, from); each piece type implements its own moves.",
+          "Reuse: Queen extends Rook and adds bishop moves; King extends Queen and limits every move to one square.",
+          "Moves: a Move records the piece, from, to, any captured piece and special flags (castling, en passant, promotion).",
+          "Game: Game holds the board, the players, whose turn it is and the move history.",
+          "Check: after a candidate move, the game asks whether the mover's king is attacked; if so the move is illegal.",
+          "Undo: Game.undo() pops the last Move and reverses it using the captured piece it stored."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Board: an 8×8 grid of Squares; each holds a Piece or nothing.",
+          "Pieces: an abstract Piece with a colour and legalMoves(board, from); each piece type implements its own moves.",
+          "Reuse: Rook, Bishop and Queen share a slide(board, from, directions) helper; King and Knight list their fixed steps.",
+          "Moves: a Move records the piece, from, to, any captured piece and special flags (castling, en passant, promotion).",
+          "Game: Game holds the board, the players, whose turn it is and the move history.",
+          "Check: after a candidate move, the game asks whether the mover's king is attacked; if so the move is illegal.",
+          "Undo: Game.undo() pops the last Move and reverses it using the captured piece it stored."
+        ]
+      }
+    },
+    {
+      "id": "ood-hotel",
+      "kind": "oop",
+      "type": "lines",
+      "title": "A room booked forever",
+      "briefMd": "A hotel booking system: guests search rooms by date range and type, book, cancel, check in and check out. Rooms are booked months ahead.",
+      "tags": [
+        "object-oriented design"
+      ],
+      "explanationMd": "One boolean can't describe a calendar. A room booked for next July is \"booked\" today too, so nobody can book it for tonight, and a cancellation flips it back for everyone.\n\nAvailability depends on reservations over time: a room is free for a range when no active reservation overlaps it (`start < requestedEnd && end > requestedStart`). Storing state on an entity that should be **derived** from the records that own the truth is a common OOD mistake.",
+      "doc": {
+        "lines": [
+          "Rooms: Room has a number, type (single, double, suite), floor and nightly rate.",
+          "Availability: Room has an isBooked flag, set when a reservation is made and cleared at checkout.",
+          "Search: find rooms of a type that are free for the requested dates.",
+          "Reservations: a Reservation has a guest, a room, check-in and check-out dates and a status.",
+          "Payments: a deposit is charged at booking and the rest at checkout through a PaymentGateway interface.",
+          "Cancellation: a CancellationPolicy decides the refund from how far ahead the guest cancels.",
+          "Housekeeping: after checkout the room is marked for cleaning before the next guest checks in."
+        ],
+        "bad": [
+          2
+        ],
+        "fixed": [
+          "Rooms: Room has a number, type (single, double, suite), floor and nightly rate.",
+          "Availability: a room is free for a date range when none of its active reservations overlap that range.",
+          "Search: find rooms of a type that are free for the requested dates.",
+          "Reservations: a Reservation has a guest, a room, check-in and check-out dates and a status.",
+          "Payments: a deposit is charged at booking and the rest at checkout through a PaymentGateway interface.",
+          "Cancellation: a CancellationPolicy decides the refund from how far ahead the guest cancels.",
+          "Housekeeping: after checkout the room is marked for cleaning before the next guest checks in."
+        ]
+      }
+    },
+    {
+      "id": "ood-logger",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A logger nobody can swap",
+      "briefMd": "Logging for a backend with 200 classes. Tests need to check what was logged, and production wants JSON logs shipped to a log service.",
+      "tags": [
+        "design patterns",
+        "solid",
+        "testing"
+      ],
+      "choices": [
+        "Every class grabs one global, file-bound instance, so tests can't capture logs and moving to JSON or a log service changes everyone's dependency. Pass in a Logger interface with pluggable sinks.",
+        "The background writer thread should go: writing synchronously is always faster.",
+        "Rotation should be weekly, to keep fewer files.",
+        "Thread names don't belong in log lines, because they change between runs."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "A singleton is global state and a hidden dependency: nothing in a class's constructor says it logs, and all 200 classes are wired to one file-writing implementation. That's why tests can't capture log lines without touching the real file, and why switching to JSON or a log service is a change to everyone's dependency.\n\nDepend on an abstraction and pass it in (**dependency inversion**): a `Logger` interface with pluggable sinks. Real logging libraries (SLF4J, Python's `logging`) work this way, with a logger per class from a factory and handlers chosen by configuration.",
+      "doc": {
+        "lines": [
+          "Logger: a singleton, Logger.getInstance(), that appends lines to /var/log/app.log.",
+          "Usage: every class calls Logger.getInstance().log(level, message) wherever it needs to.",
+          "Levels: DEBUG, INFO, WARN and ERROR, with the minimum level read from config at startup.",
+          "Format: plain text lines with timestamp, level, thread name and message.",
+          "Rotation: the file is rotated daily and kept for 14 days.",
+          "Performance: log calls go on an in-memory queue that a background thread writes out."
+        ],
+        "bad": [
+          1,
+          2
+        ],
+        "fixed": [
+          "Logger: an interface, log(level, message), with sinks: FileSink, JsonSink for the log service, MemorySink for tests.",
+          "Usage: classes receive a Logger in their constructor (or ask a LoggerFactory for one named after the class).",
+          "Levels: DEBUG, INFO, WARN and ERROR, with the minimum level read from config at startup.",
+          "Format: plain text lines with timestamp, level, thread name and message.",
+          "Rotation: the file is rotated daily and kept for 14 days.",
+          "Performance: log calls go on an in-memory queue that a background thread writes out."
+        ]
+      }
+    },
+    {
+      "id": "ood-elevator",
+      "kind": "oop",
+      "type": "lines",
+      "title": "Two elevators answer one button",
+      "briefMd": "An elevator system for a 30-floor office with 6 elevators. People press up or down on a floor (hall calls) and pick a floor inside (car calls).",
+      "tags": [
+        "object-oriented design",
+        "concurrency"
+      ],
+      "explanationMd": "With elevators grabbing calls from a shared list, two can claim the same call (both arrive, one trip wasted), or a far-away idle car beats one that is about to pass the floor. Nothing owns the decision, and the scheduling policy is smeared across six objects racing each other.\n\nGive the decision to one object: a **Dispatcher** (controller) assigns each hall call to exactly one elevator using a cost function (distance, direction, load). Scheduling policy lives in one place and can be swapped (Strategy), and elevators simply work through their own queues.",
+      "doc": {
+        "lines": [
+          "Elevator: a current floor, a direction (up, down, idle), a door state and a queue of stops.",
+          "Car calls: buttons inside an elevator add a stop to that elevator's own queue.",
+          "Hall calls: go into one shared list; every idle or passing elevator scans it and takes the first call it sees.",
+          "Movement: an elevator serves stops in its current direction first, then reverses (the SCAN algorithm).",
+          "Capacity: a load sensor stops new pickups when the car is above 90% of its rated weight.",
+          "Display: each floor shows where every elevator is and which way it's going.",
+          "Emergencies: fire mode sends every elevator to the lobby and ignores calls."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Elevator: a current floor, a direction (up, down, idle), a door state and a queue of stops.",
+          "Car calls: buttons inside an elevator add a stop to that elevator's own queue.",
+          "Hall calls: a Dispatcher assigns each hall call to one elevator (the one that can get there soonest), which adds it to its queue.",
+          "Movement: an elevator serves stops in its current direction first, then reverses (the SCAN algorithm).",
+          "Capacity: a load sensor stops new pickups when the car is above 90% of its rated weight.",
+          "Display: each floor shows where every elevator is and which way it's going.",
+          "Emergencies: fire mode sends every elevator to the lobby and ignores calls."
+        ]
+      }
+    },
+    {
+      "id": "ood-expense-split",
+      "kind": "oop",
+      "type": "lines",
+      "title": "The missing cent",
+      "briefMd": "An expense-splitting app: a group adds expenses, splits them equally, by exact amounts or by percentage, and settles up. Balances in a group must always add up to zero.",
+      "tags": [
+        "object-oriented design"
+      ],
+      "explanationMd": "$10 split three ways is 3.3333… in floating point: the shares don't add back up to the total, and errors like `0.1 + 0.2 != 0.3` make balances drift until \"settled\" groups still show tiny debts.\n\nMoney needs an exact representation, integer cents (or `BigDecimal` / `Decimal`) wrapped in a `Money` value object, and an explicit rule for the remainder ($10.00 / 3 = $3.34 + $3.33 + $3.33). Using a raw primitive for a domain concept like money is called **primitive obsession**.",
+      "doc": {
+        "lines": [
+          "Groups: a Group has members and a list of Expenses.",
+          "Expense: payer, total, participants and a SplitStrategy (equal, exact or percentage).",
+          "Money: amounts are double values in dollars; an equal share is total / number of participants.",
+          "Balances: a Ledger keeps how much each member owes each other member, updated per expense.",
+          "Settling up: suggests the fewest payments by matching the biggest debtor with the biggest creditor.",
+          "Validation: exact splits must add up to the total, and percentages to 100.",
+          "History: expenses can be edited or deleted; the ledger is recomputed from the expense list."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Groups: a Group has members and a list of Expenses.",
+          "Expense: payer, total, participants and a SplitStrategy (equal, exact or percentage).",
+          "Money: amounts are integer cents in a Money type; an equal split gives total / n cents each and hands the leftover cents to the first participants.",
+          "Balances: a Ledger keeps how much each member owes each other member, updated per expense.",
+          "Settling up: suggests the fewest payments by matching the biggest debtor with the biggest creditor.",
+          "Validation: exact splits must add up to the total, and percentages to 100.",
+          "History: expenses can be edited or deleted; the ledger is recomputed from the expense list."
+        ]
+      }
+    },
+    {
+      "id": "ood-file-system",
+      "kind": "oop",
+      "type": "choice",
+      "title": "Folders full of special cases",
+      "briefMd": "An in-memory file system: files and folders, `ls`, `du` (total size), move and delete. Symlinks are the likely follow-up.",
+      "tags": [
+        "design patterns"
+      ],
+      "choices": [
+        "Files and directories share no type, so every operation needs two lists and two code paths (and symlinks would add a third). Use the Composite pattern: a Node interface that File and Directory both implement.",
+        "resolve should use a regular expression instead of splitting on \"/\".",
+        "Directory.size() should be cached forever after the first call.",
+        "ls should list subdirectories before files, like most file managers."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Files and directories have no common type, so every operation (size, ls, move, delete) needs two lists and two code paths, and a symlink would add a third everywhere.\n\nThe **Composite** pattern gives leaves and containers one interface: a `Node` with `size()`, implemented by File and Directory, where a Directory holds child Nodes. Recursive operations collapse to one line (`sum(child.size() for child in children)`), and a new kind of node plugs in without touching the others.",
+      "doc": {
+        "lines": [
+          "Classes: File has a name, size and contents; Directory has a name, a list of files and a list of subdirectories.",
+          "Paths: resolve(path) walks from the root, splitting on \"/\".",
+          "Size: Directory.size() loops over its files, then recursively over its subdirectories.",
+          "Listing: ls(path) prints files and subdirectories, sorted by name.",
+          "Moving: move(src, dst) removes the entry from its parent and adds it to the destination directory.",
+          "Deleting: delete(path) removes a file, or a directory with everything under it."
+        ],
+        "bad": [
+          1,
+          3
+        ],
+        "fixed": [
+          "Classes: an abstract Node (name, parent, size()); File and Directory extend it, and a Directory holds a list of child Nodes.",
+          "Paths: resolve(path) walks from the root, splitting on \"/\".",
+          "Size: File.size() is its length; Directory.size() sums size() over its children without asking what each one is.",
+          "Listing: ls(path) prints files and subdirectories, sorted by name.",
+          "Moving: move(src, dst) removes the entry from its parent and adds it to the destination directory.",
+          "Deleting: delete(path) removes a file, or a directory with everything under it."
+        ]
+      }
+    },
+    {
+      "id": "ood-ride-fare",
+      "kind": "oop",
+      "type": "choice",
+      "title": "A fare that reaches through four objects",
+      "briefMd": "The trip service of a ride-hailing app. Fares depend on the car type (standard, XL, premium), surge, distance and time, and pricing rules change every week.",
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ],
+      "choices": [
+        "Trip reaches through driver → car → type → rate plan, so it depends on the internals of four classes (Law of Demeter). A PricingService that takes the car type, distance, time and surge should own the rules.",
+        "Surge multipliers should be cached for an hour to cut load.",
+        "Matching should offer the ride to every nearby driver at once and take the first to accept.",
+        "Ratings should be stored on the Trip object rather than in their own table."
+      ],
+      "answerIndex": 0,
+      "explanationMd": "A chain like `driver.getCar().getType().getRatePlan()` ties `Trip` to the insides of four other classes: change how cars store their type, or where rate plans live, and fare code breaks. The **Law of Demeter** (\"only talk to your immediate neighbours\") flags exactly this.\n\nMove the knowledge to where it belongs: a `PricingService` that owns the rules and quotes a fare from plain inputs. With pricing changing weekly, that also gives the rules one home that can be tested on its own.",
+      "doc": {
+        "lines": [
+          "Trip: rider, driver, pickup, drop-off, start and end times, route distance and status.",
+          "Matching: a Matcher offers the request to the nearest available drivers, one at a time.",
+          "Fare: Trip.fare() computes driver.getCar().getType().getRatePlan().perKm() × km + perMinute × minutes, times surge.",
+          "Surge: a SurgeService gives a multiplier per area, cached for one minute.",
+          "Payment: the rider's saved method is charged when the trip ends, and a receipt is emailed.",
+          "Ratings: rider and driver rate each other after the trip."
+        ],
+        "bad": [
+          3
+        ],
+        "fixed": [
+          "Trip: rider, driver, pickup, drop-off, start and end times, route distance and status.",
+          "Matching: a Matcher offers the request to the nearest available drivers, one at a time.",
+          "Fare: a PricingService.quote(carType, km, minutes, surge) owns the rate plans; the Trip stores the quote it was given.",
+          "Surge: a SurgeService gives a multiplier per area, cached for one minute.",
+          "Payment: the rider's saved method is charged when the trip ends, and a receipt is emailed.",
+          "Ratings: rider and driver rate each other after the trip."
+        ]
+      }
+    }
+  ]
+}

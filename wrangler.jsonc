@@ -1,0 +1,13 @@
+{
+  // Static-assets-only Cloudflare Worker: serves ./dist, and unknown paths fall back to index.html (SPA routing).
+  // Rename it to whatever your Worker should be called.
+  "name": "dailylearncode",
+  "compatibility_date": "2026-10-01",
+  // true: also serve on <name>.<your-account>.workers.dev. Set to false once you add a custom domain
+  // if you want the site reachable on that domain only.
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

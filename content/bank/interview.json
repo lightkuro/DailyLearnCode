@@ -1,0 +1,1987 @@
+{
+  "kind": "interview",
+  "questions": [
+    {
+      "id": "int-sysdesign-01",
+      "promptMd": "Your Postgres primary sits at **90% CPU**. About 95% of queries are reads of product pages, and those pages can be a few seconds stale. Writes are light. What's the best next step?",
+      "choices": [
+        "Shard the products table across several primaries by product id",
+        "Add read replicas and route the stale-tolerant reads to them",
+        "Migrate the catalog to a NoSQL store for better throughput",
+        "Raise the connection pool limit so more queries run at once"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The load is reads that tolerate a little staleness, which is exactly what asynchronous read replicas absorb. Sharding solves write or data-size limits and adds a lot of complexity you don't need yet.",
+      "choiceNotesMd": [
+        "Sharding spreads writes and data size; here writes are light, so it adds cross-shard complexity for no gain.",
+        "Correct: replicas scale reads horizontally, and a second or two of replica lag is acceptable for these pages.",
+        "A rewrite is a huge, risky project, and a different engine doesn't remove the need to spread the read load.",
+        "The CPU is already saturated; more concurrent queries just queue for the same cores (and often make latency worse)."
+      ],
+      "topicMd": "**Scaling reads.** Most web workloads are read-heavy, and the usual escalation for a relational database is:\n\n1. **Fix the queries**: indexes, removing N+1 patterns, fetching less.\n2. **Cache** hot results (Redis, or a CDN for whole pages).\n3. **Read replicas**: the primary streams its log to followers, and the application sends reads that can tolerate a little lag to them. Each replica adds read capacity, though not write capacity.\n4. **Scale up** the primary, then **shard** only when writes or data size outgrow one machine.\n\n---\n\nReplicas bring **replication lag**. A user who just saved something and then reads from a lagging replica may see the old value. Common fixes: read your own recent writes from the primary (for example, for a few seconds after a write, or by passing along the last write's log position), and keep strongly consistent reads such as balances or inventory on the primary.\n\nIn an interview, say which reads can be stale before you add replicas: that's the trade-off the interviewer wants to hear.",
+      "keyTerms": [
+        {
+          "term": "Read replica",
+          "def": "A copy of the database that follows the primary and serves reads."
+        },
+        {
+          "term": "Replication lag",
+          "def": "Delay between a write on the primary and its appearance on a replica."
+        },
+        {
+          "term": "Vertical scaling",
+          "def": "Moving to a bigger machine instead of adding more machines."
+        }
+      ],
+      "tags": [
+        "scalability",
+        "databases"
+      ]
+    },
+    {
+      "id": "int-sysdesign-02",
+      "promptMd": "A write-heavy `events` table is **range-sharded by `created_at`**. Why is that usually a poor shard key?",
+      "choices": [
+        "All new writes hit the shard that owns the newest range, creating a hot spot",
+        "Timestamps can repeat, so two events would collide on the same shard key",
+        "Queries for a time range must fan out to every shard and merge the results",
+        "Range sharding hashes the timestamp first, so the time order is lost"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "With a monotonically increasing key, the newest range receives every insert, so one shard takes all the write load while the others sit idle. Range queries by time are actually what this layout does well.",
+      "choiceNotesMd": [
+        "Correct: a monotonic key funnels all inserts to one shard. Hash the key, or lead with something high-cardinality such as `tenant_id`.",
+        "Duplicate shard-key values are fine; rows with the same key just live on the same shard. Uniqueness comes from the primary key.",
+        "The opposite: range sharding by time keeps a time range on one or a few shards. Hash sharding is what causes this fan-out.",
+        "Range sharding keeps values in order; that's the point of it. Hash sharding is the one that scatters them."
+      ],
+      "topicMd": "**Choosing a shard key.** The shard key decides which machine owns each row, so it decides both load balance and which queries stay on one shard.\n\nA good key has:\n\n- **High cardinality**: many distinct values, so data can spread over many shards.\n- **Even write distribution**: no single value or range gets most of the traffic.\n- **Query locality**: the most common queries include the key, so they hit one shard instead of all of them.\n\n---\n\n**Range vs hash sharding.** Range sharding (A to F on shard 1, and so on) keeps neighbouring keys together and makes range scans cheap, but a monotonically increasing key (timestamps, auto-increment ids) sends every insert to the last range. Hash sharding spreads writes evenly but turns range queries into scatter-gather.\n\nA common compromise is a compound key such as `(tenant_id, created_at)`: hash on the tenant to spread load, and keep each tenant's events ordered by time. Watch for **hot keys**: one huge tenant can still overload its shard, so very large tenants may need splitting further.",
+      "keyTerms": [
+        {
+          "term": "Shard key",
+          "def": "The column(s) that decide which shard stores a row."
+        },
+        {
+          "term": "Hot spot",
+          "def": "One shard or node receiving far more load than the rest."
+        },
+        {
+          "term": "Scatter-gather",
+          "def": "Sending a query to every shard and merging the answers."
+        }
+      ],
+      "tags": [
+        "sharding",
+        "system design"
+      ]
+    },
+    {
+      "id": "int-sysdesign-03",
+      "promptMd": "Workers pull image-resize jobs from a queue. A few uploads are corrupt, so the worker crashes on them; the message becomes visible again, is redelivered, crashes the next worker, and so on forever. What's the standard fix?",
+      "choices": [
+        "Acknowledge each message as soon as it's received, before processing",
+        "Cap retries, then move the message to a dead-letter queue",
+        "Increase the visibility timeout so redeliveries happen less often",
+        "Add more workers so that the healthy jobs still get processed"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A **poison message** will never succeed, so retrying it forever wastes workers. After N failed attempts, park it in a dead-letter queue, alert on it, and inspect it later.",
+      "choiceNotesMd": [
+        "Acking before processing means a crash loses every in-flight job, including the good ones (at-most-once delivery).",
+        "Correct: a maximum receive count plus a DLQ isolates poison messages without losing them.",
+        "That only slows the loop down; the message still comes back and crashes a worker every time.",
+        "More workers keep throughput up for a while, but the poison messages keep crashing workers and burning capacity."
+      ],
+      "topicMd": "**Queues and failure handling.** Most queues (SQS, RabbitMQ, Kafka consumers, Pub/Sub) give **at-least-once** delivery: a message is redelivered until a consumer acknowledges it. That's what makes them reliable, and it's also why a message that always fails becomes a **poison message** that loops forever.\n\nThe standard toolkit:\n\n- **Ack after processing**, never before, so a crash means a retry rather than a lost job.\n- **Retry with backoff** for transient errors (a timeout calling a dependency).\n- **Max delivery attempts**, then move the message to a **dead-letter queue** (DLQ). Alert on DLQ depth, fix the bug or the data, and **redrive** the messages back.\n- **Idempotent consumers**, since retries and redeliveries mean the same job can run twice.\n\n---\n\nAlso watch **queue depth** and the **age of the oldest message**: they're the best signals that consumers are falling behind. In ordered streams (Kafka partitions), a poison message blocks everything behind it in that partition, so moving it to a dead-letter topic matters even more.",
+      "keyTerms": [
+        {
+          "term": "Poison message",
+          "def": "A message that fails every time it's processed."
+        },
+        {
+          "term": "Dead-letter queue",
+          "def": "Where messages go after too many failed attempts, for later inspection."
+        },
+        {
+          "term": "Visibility timeout",
+          "def": "How long a received message stays hidden before it's redelivered."
+        }
+      ],
+      "tags": [
+        "message queues",
+        "reliability"
+      ]
+    },
+    {
+      "id": "int-sysdesign-04",
+      "promptMd": "An API limits each key to **100 requests per minute** using a fixed-window counter that resets at the start of every clock minute. What's the most requests a client can get accepted within a **2-second** span?",
+      "choices": [
+        "100",
+        "101",
+        "200",
+        "300"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Send 100 requests at 12:00:59 and 100 more at 12:01:00: they land in different windows, so all 200 pass. Fixed windows allow up to twice the limit around a boundary.",
+      "choiceNotesMd": [
+        "That's what the limit intends, but fixed windows don't enforce it over spans that straddle a reset.",
+        "Plausible if you picture one extra request slipping through, but the counter resets fully, so a whole new 100 are allowed.",
+        "Correct: 100 at the end of one window plus 100 at the start of the next.",
+        "A 2-second span can cross at most one minute boundary, so it touches at most two windows."
+      ],
+      "topicMd": "**Rate-limiting algorithms.**\n\n- **Fixed window**: one counter per key per clock minute. Cheap (one `INCR` with an expiry in Redis), but bursts at the boundary can reach twice the limit.\n- **Sliding window log**: store each request's timestamp and count those in the last 60 s. Exact, but memory grows with the limit.\n- **Sliding window counter**: weight the previous window's count by how much of it still overlaps (30 s into the minute, count = current + 0.5 × previous). Nearly exact with two counters.\n- **Token bucket**: tokens refill at a steady rate up to a capacity, and each request spends one. Allows controlled bursts.\n- **Leaky bucket**: requests drain at a fixed rate, smoothing the output.\n\n---\n\nIn a distributed service, keep the counters in a shared store (Redis) so every gateway instance sees the same count, or accept approximate per-instance limits. Return **429 Too Many Requests** with a `Retry-After` header, and decide whether to limit per user, per API key, per IP address or per endpoint.",
+      "keyTerms": [
+        {
+          "term": "Fixed window",
+          "def": "A counter per key that resets at fixed clock boundaries."
+        },
+        {
+          "term": "Sliding window counter",
+          "def": "Blends the current and previous windows' counts to approximate a true rolling window."
+        },
+        {
+          "term": "429 Too Many Requests",
+          "def": "HTTP status telling a client it has hit a rate limit."
+        }
+      ],
+      "tags": [
+        "rate limiting"
+      ]
+    },
+    {
+      "id": "int-sysdesign-05",
+      "promptMd": "You're designing a ticketing system where 50,000 fans try to buy 2,000 seats the moment sales open. Which piece of data **must** be strongly consistent?",
+      "choices": [
+        "The event's description, venue and date on the listing page",
+        "The record of which buyer holds each specific seat",
+        "The count of remaining seats shown next to the Buy button",
+        "The list of other events that fans of this artist viewed"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Selling the same seat twice is the one error the business can't tolerate, so seat assignment needs a single source of truth and an atomic check-and-set. Everything else can be cached and slightly stale.",
+      "choiceNotesMd": [
+        "It rarely changes and is fine to cache aggressively; a few seconds of staleness hurts no one.",
+        "Correct: the write that assigns a seat must be atomic, e.g. `UPDATE seats SET holder = ? WHERE id = ? AND holder IS NULL`.",
+        "Tempting, but it's only a display hint. Showing \"about 40 left\" when it's 37 is fine, as long as the purchase itself is checked atomically.",
+        "Recommendations are a classic eventually consistent feature."
+      ],
+      "topicMd": "**Choosing consistency per feature.** Strong consistency everywhere is slow and expensive; eventual consistency everywhere causes real bugs. Good designs decide per piece of data by asking: *what goes wrong if this is a few seconds stale?*\n\nFor a ticket sale:\n\n- **Seat ownership**: double-selling is unacceptable. Use one authoritative store and an atomic conditional write, or a short-lived **reservation** (hold the seat for 10 minutes while the buyer pays, then release it if payment fails).\n- **Remaining counts, listings, search**: serve from caches or replicas; slightly stale numbers are fine.\n- **Analytics, recommendations**: update asynchronously from an event stream.\n\n---\n\nFlash sales also need **load shaping**: a virtual waiting room in front of checkout, per-user limits, and bot protection. Otherwise the inventory rows for a popular section become a hot spot where thousands of transactions contend for the same locks. Partitioning inventory (by section or seat block) spreads that contention.",
+      "keyTerms": [
+        {
+          "term": "Strong consistency",
+          "def": "Every read sees the latest committed write."
+        },
+        {
+          "term": "Eventual consistency",
+          "def": "Replicas converge over time, so reads may briefly be stale."
+        },
+        {
+          "term": "Conditional write",
+          "def": "An update that applies only if the current value matches an expectation."
+        }
+      ],
+      "tags": [
+        "system design",
+        "consistency"
+      ]
+    },
+    {
+      "id": "int-sysdesign-06",
+      "promptMd": "A service handles about **100 million requests per day**, and peak traffic is roughly **3×** the daily average. Roughly what peak request rate should you plan for?",
+      "choices": [
+        "About 350 requests/s",
+        "About 1,200 requests/s",
+        "About 3,500 requests/s",
+        "About 35,000 requests/s"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "A day has 86,400 seconds (call it 100,000), so 100 million a day averages about 1,200 requests/s, and 3× that is roughly 3,500/s.",
+      "choiceNotesMd": [
+        "Off by 10×: that's about a third of the *average*, not three times it.",
+        "That's the daily average (100,000,000 / 86,400 ≈ 1,160). Planning for the average means falling over at peak.",
+        "Correct: about 1,160/s on average, times 3 ≈ 3,500/s.",
+        "Off by 10×; that peak would mean about a billion requests per day."
+      ],
+      "topicMd": "**Back-of-the-envelope estimates.** Interviewers want order-of-magnitude reasoning, stated out loud, not exact arithmetic.\n\nHandy numbers:\n\n- A day is 86,400 s, roughly **10^5 s**. So 1 million requests/day ≈ 12/s, and 1 billion/day ≈ 12,000/s.\n- A month is about 2.6 million seconds; a year about 31.5 million.\n- Peak is often **2 to 5×** the average, depending on how spiky traffic is.\n- Storage = records/day × bytes/record × retention × replication factor. 50 million 1 KB records a day is 50 GB/day, about 18 TB a year before replication.\n\n---\n\nSteps that work well:\n\n1. Start from users: daily active users × actions per user per day.\n2. Convert to requests per second, then apply a peak factor.\n3. Split reads from writes (read:write ratios of 10:1 or 100:1 are common).\n4. Estimate storage and bandwidth, then ask what one machine can handle (a few thousand to tens of thousands of simple requests/s) to size the fleet.\n\nRound aggressively and state your assumptions: the goal is to know whether you need 1 server or 1,000.",
+      "keyTerms": [
+        {
+          "term": "QPS",
+          "def": "Queries (requests) per second."
+        },
+        {
+          "term": "Peak factor",
+          "def": "How much higher peak traffic is than the average."
+        }
+      ],
+      "tags": [
+        "scalability",
+        "system design"
+      ]
+    },
+    {
+      "id": "int-sysdesign-07",
+      "promptMd": "You're designing a video-sharing site. Where should the uploaded **video files themselves** live?",
+      "choices": [
+        "In a `BLOB` column of the main relational database, beside the metadata",
+        "On the local disks of the web servers that received each upload",
+        "In a document database, one document per video holding all its encoded bytes",
+        "In object storage (like S3), served through a CDN, with metadata in a DB"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Object storage is built for large immutable files: cheap, durable, effectively unlimited, and easy to put a CDN in front of. The database keeps only small metadata and each object's key.",
+      "choiceNotesMd": [
+        "Large blobs bloat the database, its backups and its replicas, and every byte served goes through your most precious server.",
+        "Local disks vanish with the server and aren't shared, so other servers can't serve the file and scaling out breaks.",
+        "Document stores cap document size (16 MB in MongoDB) and aren't designed for streaming large binaries.",
+        "Correct: blobs in object storage, metadata (title, owner, object key, status) in a database, bytes delivered from CDN edges."
+      ],
+      "topicMd": "**Picking storage by access pattern.**\n\n- **Relational database** (Postgres, MySQL): structured data, transactions, joins, constraints. The default for core business data.\n- **Key-value store** (Redis, DynamoDB): fast lookups by key, sessions, counters, caches.\n- **Document store** (MongoDB): self-contained JSON-like records with flexible fields.\n- **Wide-column store** (Cassandra, Bigtable): huge write volumes and time series, partitioned by key.\n- **Object storage** (S3, GCS, Azure Blob): large immutable files (images, video, backups) addressed by key. Cheap per GB, very durable, and served well through a CDN.\n- **Search index** (Elasticsearch, OpenSearch): full-text and faceted search, kept in sync from the source of truth.\n\n---\n\nFor media, a typical flow is: the client asks the API for a **pre-signed upload URL** and uploads directly to object storage (so your servers never proxy gigabytes); an event triggers transcoding into several resolutions; and the database records the object keys and status. Viewers then stream video segments from a CDN.",
+      "keyTerms": [
+        {
+          "term": "Object storage",
+          "def": "A service storing files as objects addressed by key, such as S3."
+        },
+        {
+          "term": "Pre-signed URL",
+          "def": "A time-limited URL that lets a client upload or download one object directly."
+        },
+        {
+          "term": "Transcoding",
+          "def": "Converting a video into other formats and resolutions."
+        }
+      ],
+      "tags": [
+        "system design",
+        "databases"
+      ]
+    },
+    {
+      "id": "int-sysdesign-08",
+      "promptMd": "Your social app builds home timelines with **fan-out on write**: when someone posts, the post id is pushed into each follower's precomputed timeline. A user with **40 million followers** is about to join. What's the usual way to handle accounts like that?",
+      "choices": [
+        "Fan out their posts too, but on a larger pool of background workers",
+        "Switch every user to fan-out on read so all accounts are handled the same way",
+        "Skip fan-out for them and merge their recent posts into timelines at read time",
+        "Cap the number of followers any single account is allowed to have"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "A single post from that account would mean 40 million timeline writes. The hybrid approach pushes posts from ordinary users but pulls posts from very large accounts when a follower opens their timeline, then merges the two.",
+      "choiceNotesMd": [
+        "Workers help throughput, but each post still costs 40 million writes and reaches followers' timelines minutes late.",
+        "Pure fan-out on read makes every timeline load query hundreds of followed accounts, which is expensive for the common case.",
+        "Correct: the hybrid model. Push for most users, pull for celebrity accounts, merge when the timeline is read.",
+        "That's a product decision, not an engineering fix, and the product wants these accounts."
+      ],
+      "topicMd": "**Designing a news feed.** Two basic models:\n\n- **Fan-out on write (push)**: when a user posts, append the post id to every follower's timeline (often a capped list in Redis). Reads are a single cheap lookup. Writes cost one insert per follower, which explodes for accounts with millions of followers.\n- **Fan-out on read (pull)**: store posts per author; when a user opens their feed, fetch recent posts from everyone they follow and merge. Writes are cheap; reads are expensive and slow for users who follow many accounts.\n\n---\n\n**Hybrid**: push for normal accounts, pull for high-follower accounts, merge at read time. Further refinements:\n\n- Fan out only to **active** followers, and rebuild a dormant user's timeline when they return.\n- Store ids, not full posts, and hydrate them from a post cache.\n- Rank or filter after merging, and paginate with a cursor.\n\nInterviewers look for you to notice the skew: follower counts follow a power law, so a design that's fine on average can fail on the few accounts that matter most.",
+      "keyTerms": [
+        {
+          "term": "Fan-out on write",
+          "def": "Copying a new post into every follower's timeline when it's created."
+        },
+        {
+          "term": "Fan-out on read",
+          "def": "Assembling a timeline from followed accounts when it's requested."
+        },
+        {
+          "term": "Hydration",
+          "def": "Turning stored ids into full objects by looking them up."
+        }
+      ],
+      "tags": [
+        "system design",
+        "scalability"
+      ]
+    },
+    {
+      "id": "int-sysdesign-09",
+      "promptMd": "Your payment API accepts an `Idempotency-Key`. The handler does: look up the key; if it isn't found, charge the card, then store the key with the result. Customers are still occasionally **charged twice** when the app retries quickly. What's the fix?",
+      "choices": [
+        "Store each key with a TTL so that old keys expire sooner",
+        "Make the app wait longer before it retries a timed-out request",
+        "Have the server generate a fresh idempotency key for each attempt",
+        "Claim the key atomically, as \"in progress\", before charging"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Check-then-act leaves a window: two concurrent requests with the same key both see \"not found\" and both charge. Inserting the key first under a unique constraint lets exactly one request win; the other waits or gets `409 Conflict` until the first finishes, then receives the stored result.",
+      "choiceNotesMd": [
+        "Expiry controls how long duplicates are caught, not the race between two requests in flight at once.",
+        "Retries can still overlap a slow first attempt; correctness can't depend on timing.",
+        "The client must reuse the same key on every retry of one operation; a fresh key per attempt defeats deduplication.",
+        "Correct: a unique insert (or `SET NX` in Redis) makes claiming the key atomic, so only one request ever calls the card processor."
+      ],
+      "topicMd": "**Idempotent payment endpoints.** Retries are unavoidable (timeouts, flaky mobile networks), so the server must turn *the same request twice* into *one charge*.\n\nA robust design:\n\n1. The client generates one key per **logical operation** (one checkout attempt) and reuses it on every retry.\n2. The server **atomically claims** the key: an `INSERT` into an `idempotency_keys` table with a unique constraint, status `in_progress`, and a hash of the request body.\n3. If the insert conflicts, the key exists: return the stored response if it's finished, `409 Conflict` if it's still in progress, and `422` if the body differs from the original.\n4. Call the payment processor, **passing the key along** (most processors deduplicate on it too).\n5. Store the final response with the key, in the same transaction as the order update where possible.\n\n---\n\nEdge cases interviewers probe: a crash after charging but before recording (recover by asking the processor about that key), how long to keep keys (often 24 hours or more), and scoping keys per customer so one user's key can't collide with another's.",
+      "keyTerms": [
+        {
+          "term": "Idempotency key",
+          "def": "A client-chosen id that lets the server recognise retries of one operation."
+        },
+        {
+          "term": "Check-then-act",
+          "def": "Reading a condition and acting on it as two separate, racy steps."
+        },
+        {
+          "term": "Unique constraint",
+          "def": "A database rule rejecting a second row with the same key."
+        }
+      ],
+      "tags": [
+        "idempotency",
+        "system design"
+      ]
+    },
+    {
+      "id": "int-db-01",
+      "promptMd": "A hospital rule says at least one doctor must be on call. Alice and Bob are both on call and both click \"go off call\" at the same moment. Each transaction checks that the on-call count is at least 2, then updates its **own** row. Under snapshot isolation both commit, and nobody is on call. What is this anomaly?",
+      "choices": [
+        "Write skew: each changed a different row based on a stale read",
+        "A dirty read: each saw the other's change before it committed",
+        "A lost update: one transaction's write overwrote the other's",
+        "A phantom read: new rows appeared in the table between two reads"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Neither transaction wrote what the other wrote, so snapshot isolation sees no conflict, yet together they break an invariant that each one checked. Fix it with `SERIALIZABLE` isolation or by locking the rows you read (`SELECT ... FOR UPDATE`).",
+      "choiceNotesMd": [
+        "Correct: two transactions read overlapping data, write different rows, and the combined result violates a rule.",
+        "Snapshot isolation never shows uncommitted data; each transaction saw a consistent committed snapshot.",
+        "A lost update needs both to write the *same* row; here Alice and Bob each updated their own.",
+        "Phantoms are rows appearing in a repeated query within one transaction; nothing was inserted here."
+      ],
+      "topicMd": "**Write skew** is the anomaly that snapshot isolation (Postgres `REPEATABLE READ`, Oracle's `SERIALIZABLE`) allows. The pattern:\n\n1. Read some rows and check a condition (at least 2 on call, room not booked, combined balance ≥ 0).\n2. Decide based on that read.\n3. Write to a *different* row than the other transaction writes.\n\nBecause the writes don't touch the same rows, there's no write-write conflict to detect, and both commit.\n\n---\n\n**Fixes:**\n\n- **Serializable isolation**: Postgres's Serializable Snapshot Isolation tracks read/write dependencies and aborts one transaction, which you retry.\n- **Lock what you read**: `SELECT ... FROM doctors WHERE on_call FOR UPDATE` makes the second transaction wait, then re-check.\n- **Materialize the conflict**: when the rows that matter don't exist yet (booking a free slot), create a row to lock, such as one per room per time slot.\n- **Constraints**: unique or exclusion constraints let the database enforce the invariant itself.\n\nWrite skew is a favourite interview question because it shows that \"no dirty reads and no lost updates\" still isn't serializable.",
+      "keyTerms": [
+        {
+          "term": "Write skew",
+          "def": "Concurrent transactions each write different rows based on a read the other invalidates."
+        },
+        {
+          "term": "Snapshot isolation",
+          "def": "Each transaction reads from a consistent snapshot taken when it started."
+        },
+        {
+          "term": "SELECT ... FOR UPDATE",
+          "def": "Reads rows and locks them until the transaction ends."
+        }
+      ],
+      "tags": [
+        "transactions",
+        "isolation"
+      ]
+    },
+    {
+      "id": "int-db-02",
+      "promptMd": "In an **MVCC** database such as PostgreSQL, why don't plain reads block writes (or writes block reads) on the same rows?",
+      "choices": [
+        "Updates write new row versions; readers see the version from their snapshot",
+        "Reads are served from the buffer cache, so they never touch rows that are locked",
+        "The database runs every transaction one at a time on a single thread",
+        "Readers take shared locks, but writers are allowed to skip over them"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Multi-version concurrency control keeps old row versions around. A writer adds a new version while readers keep seeing the committed versions their snapshot allows, so neither waits for the other.",
+      "choiceNotesMd": [
+        "Correct: each row version is tagged with transaction ids, and visibility rules pick the right one for each snapshot.",
+        "The buffer cache holds pages, including ones with locked rows; caching doesn't decide who sees which version.",
+        "Serial execution would avoid conflicts but throw away concurrency; Postgres runs many transactions in parallel.",
+        "Locks that can be ignored wouldn't protect anything. With MVCC, plain reads take no row locks at all."
+      ],
+      "topicMd": "**MVCC (multi-version concurrency control)** is how Postgres, MySQL's InnoDB, Oracle and SQL Server's snapshot modes let readers and writers run side by side.\n\n- Each row can have several **versions**, tagged with the transaction that created (and later replaced or deleted) them.\n- A transaction reads from a **snapshot**: it sees only versions committed before the snapshot was taken, plus its own changes.\n- An `UPDATE` writes a new version instead of overwriting in place; the old one stays visible to older snapshots.\n\nSo a long report query and a stream of updates don't wait on each other. Writers still block **other writers** on the same row, which is how lost updates are prevented.\n\n---\n\n**Costs:**\n\n- Old versions pile up and must be cleaned: Postgres's `VACUUM` (autovacuum) removes dead tuples, and InnoDB purges its undo log.\n- Very long-running transactions hold back that cleanup, causing table **bloat** and slower queries.\n- Snapshot isolation alone still allows write skew, so `SERIALIZABLE` adds extra checks on top.",
+      "keyTerms": [
+        {
+          "term": "MVCC",
+          "def": "Keeping multiple row versions so readers and writers don't block each other."
+        },
+        {
+          "term": "Snapshot",
+          "def": "The set of committed data a transaction is allowed to see."
+        },
+        {
+          "term": "VACUUM",
+          "def": "Postgres process that reclaims space from dead row versions."
+        }
+      ],
+      "tags": [
+        "databases",
+        "transactions"
+      ]
+    },
+    {
+      "id": "int-db-03",
+      "promptMd": "Your app occasionally gets `deadlock detected` errors from the database on a busy table. What's the right way to handle them in application code?",
+      "choices": [
+        "Retry the whole transaction from the start, ideally with a short backoff",
+        "Retry only the statement that failed, then carry on with the transaction",
+        "Lower the isolation level to `READ UNCOMMITTED` so no locks are taken",
+        "Ignore the error, since the database has already committed the other side"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "The database breaks a deadlock by choosing one transaction as the victim and rolling it back entirely, so the only correct recovery is to rerun all of it. Reducing deadlocks (consistent lock order, shorter transactions) lowers how often you have to.",
+      "choiceNotesMd": [
+        "Correct: the victim's work was rolled back, and rerunning the whole unit of work is safe and expected.",
+        "The victim transaction is rolled back as a whole, so retrying one statement would run it without the earlier statements' effects.",
+        "Writes take row locks at every isolation level, and dirty reads introduce worse bugs.",
+        "*Your* transaction is the one that was rolled back, so its changes are lost unless you retry."
+      ],
+      "topicMd": "**Database deadlocks.** Transaction A locks row 1 and wants row 2; transaction B holds row 2 and wants row 1. Neither can proceed, so the database's deadlock detector picks a **victim**, rolls it back, and returns an error (Postgres: `40P01`; MySQL: error 1213).\n\n**Handling them:**\n\n- Treat deadlocks and serialization failures (SQLSTATE `40001`) as **retryable**: rerun the entire transaction, with a small randomized backoff and a retry limit.\n- Keep transactions free of side effects you can't repeat (don't send an email in the middle of one).\n\n---\n\n**Reducing them:**\n\n- Touch rows in a **consistent order** (for example, sorted by id) in every code path.\n- Keep transactions **short**: no network calls or user think-time while holding locks.\n- Add indexes so updates lock only the rows they need instead of scanning and locking many.\n- Take locks up front in a known order with `SELECT ... FOR UPDATE`, or use `NOWAIT` / `SKIP LOCKED` for queue-like tables.\n\nA few deadlocks under heavy load are normal; a steady stream means the access order needs fixing.",
+      "keyTerms": [
+        {
+          "term": "Deadlock",
+          "def": "A cycle of transactions, each waiting for a lock another one holds."
+        },
+        {
+          "term": "Deadlock victim",
+          "def": "The transaction the database aborts to break the cycle."
+        },
+        {
+          "term": "Serialization failure",
+          "def": "An abort under strict isolation that the client should retry."
+        }
+      ],
+      "tags": [
+        "transactions",
+        "databases"
+      ]
+    },
+    {
+      "id": "int-db-04",
+      "promptMd": "`users.email` has a B-tree index, but this query still scans the whole table:\n\n```sql\nSELECT * FROM users WHERE LOWER(email) = 'ana@example.com';\n```\n\nWhat's the best fix?",
+      "choices": [
+        "Add a hint forcing the planner to use the existing `email` index",
+        "Rebuild the existing `email` index, since it's probably fragmented and stale",
+        "Add an expression index on `LOWER(email)`, or store emails normalized",
+        "Replace the B-tree index on `email` with a hash index"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "The index stores `email` values, not `LOWER(email)`, so wrapping the column in a function means the index can't be searched. An index on the same expression (or a column that's already lowercased) makes the predicate indexable again.",
+      "choiceNotesMd": [
+        "Even when forced, the index can't look up `LOWER(email)`; at best it would be read in full.",
+        "Fragmentation isn't the issue; the query asks for values the index doesn't contain.",
+        "Correct: `CREATE INDEX ON users (LOWER(email))` matches the query's expression exactly.",
+        "A hash index on `email` has the same problem: it's keyed on the raw value, not the lowercased one."
+      ],
+      "topicMd": "**Sargable predicates.** An index is sorted by the column's stored values. A predicate can use it for a lookup only when it compares the **bare column** to something: `email = ?`, `created_at >= ?`, `name LIKE 'abc%'`.\n\nThese usually can't use a plain index:\n\n- Functions on the column: `LOWER(email) = ?`, `DATE(created_at) = ?`\n- Arithmetic on the column: `price * 1.2 > 100`\n- Leading wildcards: `name LIKE '%abc'`\n- Implicit casts, such as comparing a text column to a number\n\n---\n\n**Fixes:**\n\n- **Rewrite** the predicate: `created_at >= '2026-01-01' AND created_at < '2026-01-02'` instead of `DATE(created_at) = ...`.\n- **Expression (functional) index**: `CREATE INDEX ON users (LOWER(email))` in Postgres; MySQL 8 supports functional key parts too.\n- **Normalize on write**: store a lowercase copy, or use a case-insensitive type or collation (Postgres `citext`, for example).\n\nAlways confirm with `EXPLAIN` (or `EXPLAIN ANALYZE`) that the plan uses an index scan rather than a sequential scan.",
+      "keyTerms": [
+        {
+          "term": "Sargable",
+          "def": "A predicate written so that an index can be used to evaluate it."
+        },
+        {
+          "term": "Expression index",
+          "def": "An index on the result of an expression, such as LOWER(email)."
+        },
+        {
+          "term": "EXPLAIN",
+          "def": "SQL command that shows the plan the database will use for a query."
+        }
+      ],
+      "tags": [
+        "indexing",
+        "sql"
+      ]
+    },
+    {
+      "id": "int-db-05",
+      "promptMd": "When is a **document database** (such as MongoDB) usually a better fit than a relational one?",
+      "choices": [
+        "When records are read and written as self-contained units with varying fields",
+        "When the data has many relationships that are queried from several directions",
+        "When you need multi-row transactions with strict constraints across tables",
+        "When analysts will run ad-hoc reports that join many different entities"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Documents shine when the unit you load and save is one aggregate (a product with its variants, a user profile with its settings) and its shape varies. Heavily related data, cross-entity constraints and ad-hoc joins favour a relational database.",
+      "choiceNotesMd": [
+        "Correct: one read fetches the whole aggregate, and varying fields don't need a schema migration for every variation.",
+        "Many-to-many relationships queried from different sides are exactly what joins and foreign keys are for.",
+        "Document stores now offer multi-document transactions, but relational databases with foreign keys and constraints are built for this.",
+        "Ad-hoc joins across entities are SQL's strength; document models are designed around access patterns known in advance."
+      ],
+      "topicMd": "**Relational vs document.**\n\n**Relational** databases normalize data into tables linked by keys. Strengths: joins in any direction, constraints (foreign keys, unique, check), mature transactions, and SQL for questions you didn't plan for. Costs: a fixed schema (changes need migrations) and many joins to assemble one complex object.\n\n**Document** databases store nested JSON-like documents. Strengths: an **aggregate** (an order with its line items) is read and written in one operation, fields can vary per document, and data partitions naturally by document id. Costs: duplication when the same data appears in many documents, weaker support for joins, and you must design around your queries up front.\n\n---\n\nRules of thumb:\n\n- Embed data that is owned by and read with its parent; reference data that is shared or grows without bound.\n- If you keep joining documents in application code, the data is relational.\n- Postgres's `jsonb` columns give a middle ground: relational tables with flexible, indexable JSON fields where you need them.\n\nIn interviews, justify the choice by access patterns, not by \"NoSQL scales better\".",
+      "keyTerms": [
+        {
+          "term": "Aggregate",
+          "def": "A cluster of related data treated as one unit for reads and writes."
+        },
+        {
+          "term": "Normalization",
+          "def": "Storing each fact once and linking records with keys."
+        },
+        {
+          "term": "Embedding",
+          "def": "Nesting related data inside the parent document instead of referencing it."
+        }
+      ],
+      "tags": [
+        "nosql",
+        "databases"
+      ]
+    },
+    {
+      "id": "int-db-06",
+      "promptMd": "Each `orders` row stores a copy of the customer's shipping address instead of only a `customer_id` link to the `customers` table. A reviewer says this duplicates data and should be normalized. What's the strongest reason to keep the copy?",
+      "choices": [
+        "Joins are slow, so duplicating columns into hot tables always speeds things up",
+        "The order must keep the address it shipped to, even if the customer moves",
+        "Foreign keys can't point at a table that is updated very frequently",
+        "Normalized tables can't be indexed on more than one column at a time"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "The order's address is a historical fact about that order, not a pointer to the customer's current address. If you stored only the link, editing a profile would silently rewrite where past orders were sent.",
+      "choiceNotesMd": [
+        "Denormalizing for speed can be valid, but \"always\" is wrong, and copies you must keep in sync have real costs.",
+        "Correct: this isn't really duplication. It's a snapshot, like the price paid on each order line.",
+        "Foreign keys work fine however often the referenced table is updated.",
+        "Composite indexes on several columns are standard in normalized schemas."
+      ],
+      "topicMd": "**Snapshot data vs references.** Normalization says to store each fact once. The key question is *which fact* you're storing.\n\n- The customer's **current address** is one fact: it lives on `customers` (or an `addresses` table).\n- The address an **order was shipped to** is another fact: it's fixed at the moment of purchase and must not change afterwards.\n\nThe same applies to prices (store the unit price on each order line, not just a `product_id`), tax rates, exchange rates and product names on invoices. Legal and accounting records must show what actually happened.\n\n---\n\n**When denormalizing for performance is reasonable:**\n\n- Read-heavy paths where joins are a measured bottleneck.\n- Precomputed counters (`comment_count` on posts) kept up to date in the same transaction or by an async job.\n- Read models built from events (CQRS) that can be rebuilt from the source of truth.\n\nEach copy needs an owner and an update path; otherwise copies drift apart. For historical snapshots, the lack of updates is the point.",
+      "keyTerms": [
+        {
+          "term": "Normalization",
+          "def": "Organizing tables so each fact is stored in exactly one place."
+        },
+        {
+          "term": "Denormalization",
+          "def": "Deliberately duplicating data to speed up reads."
+        },
+        {
+          "term": "Snapshot field",
+          "def": "A copy of a value as it was at a moment in time, never updated later."
+        }
+      ],
+      "tags": [
+        "databases"
+      ]
+    },
+    {
+      "id": "int-cache-01",
+      "promptMd": "With cache-aside, a service updates a user in the database and then **deletes** the cached entry instead of writing the new value into the cache. Why is deleting usually preferred?",
+      "choices": [
+        "Deleting a key is faster than writing a value, which matters under load",
+        "Concurrent updates can write the cache out of order, leaving a stale value",
+        "Writing to the cache inside the request would make the database update slower",
+        "Deleting frees memory, and updated entries are rarely read again"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "If writer A sets the cache after writer B, even though B's database write came last, the cache keeps A's older value until it expires. Deleting avoids ordering races between writers: the next read loads whatever the database holds now.",
+      "choiceNotesMd": [
+        "The speed difference is negligible; correctness is the reason.",
+        "Correct: invalidate on write, and let the next reader repopulate the entry from the source of truth.",
+        "Deleting is also a cache round trip after the database write; the cost is about the same.",
+        "Updated entries are often read right away; that's why the next read repopulates them."
+      ],
+      "topicMd": "**Keeping a cache consistent with its database.** With cache-aside, the application performs both writes, and races are the main danger.\n\n**The update-the-cache race:** writer A updates the database to v1, writer B updates it to v2, then B sets the cache to v2 and A, delayed, sets it to v1. The database says v2; the cache serves v1 until the TTL expires.\n\n**Delete instead:** after the database commit, delete the key. The next read misses and loads the current value. It's simpler and avoids most races.\n\n---\n\nA rarer race remains: a reader misses, loads the old value from the database, and writes it to the cache *just after* a writer deleted the key. Mitigations:\n\n- Always set a **TTL**, so any stale entry eventually heals.\n- **Versioned values**: only write the cache if the version is newer than what's there.\n- **Delayed double delete**: delete again a short time after the write.\n- Drive invalidation from **change data capture** (the database's log), so every committed change triggers a delete.\n\nAlso decide how much staleness is acceptable; many systems simply rely on short TTLs.",
+      "keyTerms": [
+        {
+          "term": "Cache-aside",
+          "def": "The app reads the cache, falls back to the database, and fills the cache itself."
+        },
+        {
+          "term": "Invalidation",
+          "def": "Removing or marking cached data as stale when the source changes."
+        },
+        {
+          "term": "TTL",
+          "def": "Time to live: how long an entry may be served before it expires."
+        }
+      ],
+      "tags": [
+        "caching"
+      ]
+    },
+    {
+      "id": "int-cache-02",
+      "promptMd": "What's the most direct fix for **cache penetration**: a flood of lookups for keys that **don't exist** (say, a scraper trying millions of random product ids), which miss the cache every time and overload the database?",
+      "choices": [
+        "Increase the TTL on cached products so they stay in memory longer",
+        "Add a read replica so missing ids are looked up somewhere else",
+        "Switch the cache's eviction policy from LRU to LFU",
+        "Cache the \"not found\" result too, with a short TTL"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Lookups for keys that don't exist never populate the cache, so every request falls through to the database. Caching the negative result (or checking a Bloom filter of valid ids first) stops the repeat lookups; rate-limiting the scraper helps too.",
+      "choiceNotesMd": [
+        "The products that exist were never the problem; the missing ids are never cached at all.",
+        "That moves the load rather than removing it; every bogus id still costs a database query.",
+        "Eviction policy doesn't matter when the missing entries are never stored in the first place.",
+        "Correct: negative caching turns repeated misses into hits. Keep the TTL short so newly created items show up quickly."
+      ],
+      "topicMd": "**Cache penetration** is a flood of requests for keys that don't exist anywhere. Cache-aside only stores what it finds, so each such request misses the cache *and* queries the database, every time. It happens with buggy clients, scrapers enumerating ids, and deliberate attacks.\n\n**Defences:**\n\n- **Negative caching**: store a \"not found\" marker with a short TTL (seconds to minutes).\n- **Bloom filter** of existing ids in front of the cache: if it says \"definitely not present\", return 404 without touching the database.\n- **Validate input** early (format, ranges) and **rate-limit** abusive clients.\n\n---\n\n**Related cache failure modes**, with the names interviewers use:\n\n- **Stampede (dogpile)**: a hot key expires and many requests rebuild it at once. Fix with request coalescing or early refresh.\n- **Avalanche**: many keys expire at the same moment (or the cache restarts empty). Fix with **TTL jitter** and warming.\n- **Hot key**: one key gets so much traffic that its cache node is overloaded. Fix with local in-process caching or by replicating that key.\n\nNaming the failure mode and its fix is often what the interviewer is looking for.",
+      "keyTerms": [
+        {
+          "term": "Cache penetration",
+          "def": "Requests for nonexistent keys that always miss and hit the database."
+        },
+        {
+          "term": "Negative caching",
+          "def": "Caching the fact that something doesn't exist."
+        },
+        {
+          "term": "TTL jitter",
+          "def": "Randomizing expiry times so many keys don't expire together."
+        }
+      ],
+      "tags": [
+        "caching",
+        "performance"
+      ]
+    },
+    {
+      "id": "int-cache-03",
+      "promptMd": "A celebrity's profile is cached under one key in a Redis cluster. During a live event it gets **400,000 reads per second**, and the single node holding that key maxes out its CPU while the other nodes are idle. Which change helps most?",
+      "choices": [
+        "Add more nodes to the cluster so the keyspace is spread more evenly",
+        "Serve the key from a small in-process cache on each app server",
+        "Shorten the key's TTL so the value is refreshed more often",
+        "Move the value into the database, which can handle the read load"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "Sharding spreads *different* keys across nodes, but one key always lives on one node. Caching it for a second or two in each app server's memory (or replicating it under several suffixed keys) spreads those reads across the whole fleet.",
+      "choiceNotesMd": [
+        "Adding nodes rebalances other keys, but this one still maps to a single node.",
+        "Correct: a short-lived local copy absorbs most reads before they reach Redis, and a little staleness is fine for a profile.",
+        "A shorter TTL adds rebuild work without reducing the reads hitting that node.",
+        "The database is slower than Redis and would face the same concentrated load."
+      ],
+      "topicMd": "**Hot keys.** Partitioned systems (Redis Cluster, Memcached pools, DynamoDB, Kafka) assign each key to one partition. That spreads load only if traffic is spread across keys. When a single key is extremely popular (a celebrity, a viral post, a global config flag), its partition saturates no matter how many partitions exist.\n\n**Fixes for read-hot keys:**\n\n- **Local (L1) cache** in each application instance with a very short TTL, in front of the distributed cache.\n- **Key replication**: store copies as `profile:42#0` to `profile:42#9`, which land on different nodes, and have readers pick one at random.\n- **Read replicas** for the cache shard, with clients allowed to read from them.\n\n**Write-hot keys** (a global like counter) need different tricks: split the counter into N sub-counters and sum them on read, or buffer increments and flush them in batches.\n\n---\n\nDetect hot keys before they hurt: `redis-cli --hotkeys` (with an LFU eviction policy) and most managed caches report per-key or per-shard load. In a design interview, mention the skew explicitly: \"what happens to the most popular item?\" is a standard follow-up.",
+      "keyTerms": [
+        {
+          "term": "Hot key",
+          "def": "A single key receiving a disproportionate share of traffic."
+        },
+        {
+          "term": "L1 cache",
+          "def": "A small in-process cache in front of a shared distributed cache."
+        },
+        {
+          "term": "Counter sharding",
+          "def": "Splitting one hot counter into several and summing them on read."
+        }
+      ],
+      "tags": [
+        "caching",
+        "scalability"
+      ]
+    },
+    {
+      "id": "int-dist-01",
+      "promptMd": "Your message broker guarantees **at-least-once** delivery. How do you make sure each message's effect (say, crediting an account) happens only once?",
+      "choices": [
+        "Record processed message ids in the same transaction as the effect",
+        "Switch the broker to at-most-once delivery so messages aren't repeated",
+        "Acknowledge each message before applying its effect to the database",
+        "Run only a single consumer so the same message can't be handled twice"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Duplicates are unavoidable with at-least-once delivery, so the consumer deduplicates: if the message id is already in a `processed_messages` table, skip it; otherwise apply the effect and insert the id atomically. The result is often called *effectively-once* processing.",
+      "choiceNotesMd": [
+        "Correct: an idempotent consumer. The id insert and the credit commit together, so a redelivery is detected and skipped.",
+        "At-most-once avoids duplicates by allowing losses, which is worse when money is involved.",
+        "If the consumer crashes after acking, the message is gone and the credit never happens.",
+        "A single consumer still gets redeliveries after a crash or a missed acknowledgement."
+      ],
+      "topicMd": "**Delivery guarantees.**\n\n- **At-most-once**: send and forget. No duplicates, but messages can be lost.\n- **At-least-once**: retry until acknowledged. Nothing is lost, but duplicates happen (a consumer crashes after doing the work but before acking).\n- **Exactly-once delivery** over an unreliable network isn't achievable in general. What systems offer is **exactly-once processing** (effectively-once): at-least-once delivery plus deduplication.\n\n---\n\n**Making consumers idempotent:**\n\n- **Dedup table**: store each message id under a unique constraint, in the same database transaction as the side effect. A duplicate fails the insert and is skipped.\n- **Naturally idempotent operations**: `SET status = 'shipped'` is safe to repeat; `balance = balance + 10` is not.\n- **Conditional writes** with versions or sequence numbers, so an old or repeated event can't overwrite newer state.\n\nKafka's exactly-once semantics (idempotent producers plus transactions) cover reading from and writing to Kafka itself. Effects in external systems, such as a database row or an email, still need idempotency on your side.",
+      "keyTerms": [
+        {
+          "term": "At-least-once",
+          "def": "Delivery that retries until acknowledged, so duplicates are possible."
+        },
+        {
+          "term": "Idempotent consumer",
+          "def": "A consumer that produces the same result however many times it sees a message."
+        },
+        {
+          "term": "Effectively-once",
+          "def": "At-least-once delivery combined with deduplication."
+        }
+      ],
+      "tags": [
+        "distributed systems",
+        "message queues"
+      ]
+    },
+    {
+      "id": "int-dist-02",
+      "promptMd": "Raft-based clusters such as etcd are usually run with **3 or 5** nodes. Why isn't 4 nodes a better choice than 3?",
+      "choices": [
+        "Raft can only elect a leader when the node count is an odd number",
+        "With 4 nodes, votes can tie 2 to 2 and the cluster gets stuck forever",
+        "4 nodes tolerate two failures but double the replication traffic",
+        "Both survive just one failure, and 4 needs a bigger majority"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "A write commits once a majority acknowledges it: 2 of 3, or 3 of 4. Either way the cluster survives only one node failure, so the fourth node adds cost and latency without adding fault tolerance.",
+      "choiceNotesMd": [
+        "Raft works with any cluster size; even sizes are just a poor trade.",
+        "Split votes can happen, but randomized election timeouts resolve them quickly; it isn't a permanent deadlock.",
+        "Losing two of four leaves 2, which isn't a majority of 4, so the cluster stops accepting writes.",
+        "Correct: n nodes tolerate (n - 1) / 2 failures, rounded down, so 3 and 4 both tolerate 1 while 5 tolerates 2."
+      ],
+      "topicMd": "**Quorums in consensus.** Raft, Paxos and ZooKeeper's Zab commit a decision once a **majority** of nodes agree. Any two majorities overlap in at least one node, which is what stops two leaders from committing conflicting values.\n\nFault tolerance for n nodes is (n - 1) / 2, rounded down:\n\n| Nodes | Majority | Failures tolerated |\n|---|---|---|\n| 3 | 2 | 1 |\n| 4 | 3 | 1 |\n| 5 | 3 | 2 |\n| 7 | 4 | 3 |\n\nAn even count adds a node without adding tolerance, and every write must now wait for one more acknowledgement.\n\n---\n\n**Network partitions:** if a 5-node cluster splits 3 and 2, the side with 3 keeps a majority and carries on; the side with 2 can't elect a leader or commit, which prevents **split brain**. With 4 nodes split 2 and 2, neither side has a majority, so the whole cluster stalls.\n\nLarger clusters are rarely better, because each write waits for more nodes. Five is the common choice when you want to survive one planned and one unplanned outage at the same time.",
+      "keyTerms": [
+        {
+          "term": "Quorum",
+          "def": "The minimum number of nodes that must agree, usually a majority."
+        },
+        {
+          "term": "Split brain",
+          "def": "Two parts of a cluster each acting as if they're in charge."
+        },
+        {
+          "term": "Raft",
+          "def": "A consensus algorithm built around an elected leader and a replicated log."
+        }
+      ],
+      "tags": [
+        "consensus",
+        "distributed systems"
+      ]
+    },
+    {
+      "id": "int-dist-03",
+      "promptMd": "Checkout spans three services, each with its own database: payment, inventory and shipping. The payment and the inventory reservation succeed, then shipping **rejects** the order because the address is undeliverable. In a **saga**, what happens next?",
+      "choices": [
+        "The coordinator rolls back all three databases in one distributed transaction",
+        "The saga keeps retrying shipping until it succeeds, however long that takes",
+        "Compensating actions run: release the inventory hold and refund the payment",
+        "Nothing; each service's local transaction already committed, so it's final"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "A saga is a sequence of local transactions with no global rollback. When a step fails for good, the saga undoes the earlier steps by running their compensating actions, in reverse order.",
+      "choiceNotesMd": [
+        "That describes two-phase commit, which sagas exist to avoid; each step has already committed locally.",
+        "Retrying suits transient errors, but an undeliverable address will never succeed.",
+        "Correct: each step has a compensation (refund for a charge, release for a reservation), applied in reverse order.",
+        "Leaving a paid order that will never ship is exactly the inconsistency a saga is meant to clean up."
+      ],
+      "topicMd": "**Sagas** keep data consistent across services without a distributed transaction. A saga is a series of **local transactions**: each one commits in its own service and triggers the next. If a later step fails permanently, **compensating transactions** semantically undo the earlier ones.\n\nCheckout example:\n\n1. Payment: authorize the card. Compensation: void or refund.\n2. Inventory: reserve the items. Compensation: release the reservation.\n3. Shipping: create the shipment. If this fails, run step 2's compensation, then step 1's.\n\n---\n\n**Two styles:**\n\n- **Orchestration**: a central coordinator tells each service what to do and tracks progress, often with a workflow engine such as Temporal or AWS Step Functions.\n- **Choreography**: services react to each other's events. Simpler at first, harder to follow as the steps grow.\n\n**Things to get right:** compensations must be idempotent and retryable; intermediate states are visible to others (an order marked *pending*), so design for them instead of pretending the flow is atomic; and order the steps so the hardest action to undo (charging a card, sending an email) comes as late as possible.",
+      "keyTerms": [
+        {
+          "term": "Saga",
+          "def": "A sequence of local transactions with compensations instead of a global transaction."
+        },
+        {
+          "term": "Compensating transaction",
+          "def": "An action that semantically undoes an earlier committed step."
+        },
+        {
+          "term": "Orchestration",
+          "def": "A central coordinator directing each step of a workflow."
+        }
+      ],
+      "tags": [
+        "distributed systems",
+        "transactions"
+      ]
+    },
+    {
+      "id": "int-dist-04",
+      "promptMd": "A search request fans out to **100 shards** in parallel and waits for all of them. Each shard answers within 10 ms 99% of the time, but takes about 1 s on its slowest 1% of requests. Roughly how often does the whole search take about 1 s?",
+      "choices": [
+        "About 1% of searches",
+        "About 10% of searches",
+        "About 37% of searches",
+        "About 63% of searches"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "The search is slow if *any* shard is slow: 1 - 0.99^100 ≈ 0.63. Fan-out amplifies tail latency, so a 1-in-100 event per shard becomes the common case for the whole request.",
+      "choiceNotesMd": [
+        "That's each shard's tail on its own; waiting for all 100 compounds it.",
+        "That's roughly the figure for about 10 shards (1 - 0.99^10 ≈ 9.6%).",
+        "That's 0.99^100 ≈ 0.37, the chance that *every* shard is fast, i.e. the fast case.",
+        "Correct: P(at least one slow shard) = 1 - 0.99^100 ≈ 63%."
+      ],
+      "topicMd": "**Tail latency at scale.** When a request depends on many backends in parallel, its latency is the **maximum** of theirs. Rare slowness per backend becomes common for the whole request: with 100 backends each slow 1% of the time, about 63% of requests hit at least one slow backend. This is why large systems track p99 and p99.9, not just averages.\n\n---\n\n**Mitigations** (from Google's *The Tail at Scale* paper and common practice):\n\n- **Hedged requests**: if a backend hasn't answered by roughly its p95 latency, send the same request to another replica and use whichever answers first. It costs a few percent more load and cuts the tail sharply.\n- **Tied requests**: send to two replicas at once, and let the one that starts first cancel the other.\n- **Partial results**: return what arrived by a deadline (fine for search, not for payments).\n- **Reduce variability at the source**: fewer GC pauses, throttled background jobs, less queueing.\n- **Fewer fan-out legs**: bigger shards or a caching layer, so each request touches fewer machines.\n\nIn design interviews, whenever you fan out, say what the tail will look like.",
+      "keyTerms": [
+        {
+          "term": "Tail latency",
+          "def": "The slowest responses, measured by high percentiles such as p99."
+        },
+        {
+          "term": "Fan-out",
+          "def": "One request triggering many parallel requests to other servers."
+        },
+        {
+          "term": "Hedged request",
+          "def": "A duplicate request sent to another replica when the first is slow."
+        }
+      ],
+      "tags": [
+        "distributed systems",
+        "performance"
+      ]
+    },
+    {
+      "id": "int-net-01",
+      "promptMd": "A browser with nothing cached opens `https://shop.example.com` for the first time, over HTTP/1.1 or HTTP/2. In what order do these steps happen?",
+      "choices": [
+        "DNS lookup, TCP handshake, TLS handshake, HTTP request",
+        "TCP handshake, DNS lookup, TLS handshake, HTTP request",
+        "DNS lookup, TLS handshake, TCP handshake, HTTP request",
+        "DNS lookup, TCP handshake, HTTP request, TLS handshake"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "The browser needs an IP address before it can connect, a TCP connection before TLS can run over it, and an encrypted channel before it sends the HTTP request.",
+      "choiceNotesMd": [
+        "Correct: resolve the name, open the connection, secure it, then speak HTTP.",
+        "TCP needs an IP address to connect to, so the DNS lookup has to come first.",
+        "TLS runs on top of TCP (for HTTP/1.1 and HTTP/2), so the TCP connection must exist first.",
+        "With HTTPS nothing is sent in plaintext; the TLS handshake comes before any HTTP data."
+      ],
+      "topicMd": "**What happens when you open a URL** (a classic interview question: go as deep as you're asked).\n\n1. **DNS**: the browser checks its caches, then the OS resolver, which asks a recursive resolver; that walks the root, `.com` and the domain's authoritative servers to get an IP address.\n2. **TCP**: a three-way handshake (SYN, SYN-ACK, ACK), costing one round trip.\n3. **TLS 1.3**: one more round trip to agree on keys and verify the server's certificate (resumed sessions can use 0-RTT).\n4. **HTTP**: the request goes out, and the server (often behind a CDN and load balancers) responds.\n5. **Rendering**: the browser parses the HTML, fetches CSS, scripts and images over the same connection, builds the DOM and paints.\n\n---\n\n**HTTP/3** changes steps 2 and 3: it runs over **QUIC** on UDP, which combines transport and TLS 1.3 setup into a single round trip.\n\nEach round trip adds latency, so a user 150 ms away pays several hundred milliseconds before the first byte arrives. That's why CDNs terminate TLS close to users, and why connection reuse and preconnect hints help.",
+      "keyTerms": [
+        {
+          "term": "DNS resolution",
+          "def": "Turning a hostname into an IP address."
+        },
+        {
+          "term": "TLS handshake",
+          "def": "Negotiating keys and verifying the server's certificate before encrypted traffic."
+        },
+        {
+          "term": "Round trip time (RTT)",
+          "def": "Time for a packet to reach the other side and a reply to come back."
+        }
+      ],
+      "tags": [
+        "networking",
+        "http"
+      ]
+    },
+    {
+      "id": "int-net-02",
+      "promptMd": "A browser has a cached copy of `/app.js` with `ETag: \"v42\"`. It sends `If-None-Match: \"v42\"`, and the file hasn't changed. What should the server respond?",
+      "choices": [
+        "`200 OK` with the full file, plus the same `ETag`",
+        "`204 No Content` with no body",
+        "`412 Precondition Failed`",
+        "`304 Not Modified` with no body"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "A conditional `GET` whose validator still matches gets `304 Not Modified`: the browser reuses its cached copy, and only headers cross the network.",
+      "choiceNotesMd": [
+        "That works, but it wastes bandwidth; the point of a conditional request is to skip the body.",
+        "204 means the request succeeded with no content to return; it doesn't tell a cache to reuse its copy.",
+        "412 is for failed preconditions such as `If-Match` on writes; a matching `If-None-Match` on a `GET` gets 304.",
+        "Correct: 304 tells the client its copy is still valid (and can refresh its caching headers)."
+      ],
+      "topicMd": "**HTTP validation caching.**\n\nA response can carry a **validator**:\n\n- `ETag: \"v42\"`: an opaque version tag, often a content hash.\n- `Last-Modified: <date>`: a timestamp.\n\nWhen the cached copy is stale (or `no-cache` requires checking), the client revalidates with a **conditional request**: `If-None-Match: \"v42\"` or `If-Modified-Since: <date>`. If nothing changed, the server answers `304 Not Modified` with no body; otherwise `200` with the new content and a new validator.\n\n---\n\n**Freshness vs validation:**\n\n- `Cache-Control: max-age=3600` lets the client reuse a response for an hour **without asking**.\n- After that, it revalidates using the validator.\n- For fingerprinted assets (`app.3f9c1.js`), use a long `max-age` with `immutable`: the URL changes whenever the content does, so there's nothing to revalidate.\n\n**ETags for writes:** `If-Match: \"v42\"` on a `PUT` gives APIs optimistic concurrency. The server returns `412 Precondition Failed` if someone else changed the resource first.",
+      "keyTerms": [
+        {
+          "term": "ETag",
+          "def": "A version identifier for a specific representation of a resource."
+        },
+        {
+          "term": "Conditional request",
+          "def": "A request that only does its work if a validator matches or doesn't."
+        },
+        {
+          "term": "304 Not Modified",
+          "def": "Status saying the client's cached copy is still valid."
+        }
+      ],
+      "tags": [
+        "http",
+        "caching"
+      ]
+    },
+    {
+      "id": "int-net-03",
+      "promptMd": "HTTP/2 already multiplexes many requests over one connection. What problem does **HTTP/3** (over QUIC) fix that HTTP/2 over TCP still has?",
+      "choices": [
+        "HTTP/2 still sends one request at a time per connection, like HTTP/1.1",
+        "A single lost packet stalls all streams until it's retransmitted",
+        "HTTP/2 sends all headers uncompressed, repeating them on every request",
+        "HTTP/2 is a text protocol, so parsing its messages is slow"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "HTTP/2's streams share one TCP byte stream, and TCP delivers bytes strictly in order, so a single lost packet blocks every stream behind it. QUIC tracks streams independently over UDP, so a loss only delays the stream it belongs to.",
+      "choiceNotesMd": [
+        "That was HTTP/1.1's limit; HTTP/2 multiplexes many concurrent streams.",
+        "Correct: TCP-level head-of-line blocking. QUIC moves streams into the transport, so a loss affects only its own stream.",
+        "HTTP/2 compresses headers with HPACK (HTTP/3 uses QPACK).",
+        "HTTP/2 is already binary-framed; HTTP/1.1 was the text protocol."
+      ],
+      "topicMd": "**HTTP versions in brief.**\n\n- **HTTP/1.1**: a text protocol with one outstanding request per connection (pipelining was never usable in practice), so browsers open about 6 connections per host. A slow response blocks the ones queued behind it on that connection.\n- **HTTP/2**: binary framing, many concurrent **streams** on one TCP connection, and HPACK header compression. It fixes head-of-line blocking at the HTTP level, but all streams still share TCP's single in-order byte stream.\n- **HTTP/3**: runs over **QUIC**, a transport on UDP with streams built in, TLS 1.3 integrated, and QPACK header compression.\n\n---\n\n**What QUIC adds:**\n\n- **No transport head-of-line blocking**: packet loss delays only the affected stream. This matters most on lossy mobile networks.\n- **Faster setup**: transport and crypto handshakes combined into one round trip, and 0-RTT on resumption (with replay caveats for non-idempotent requests).\n- **Connection migration**: a connection id, not the IP address and port, identifies the connection, so switching from Wi-Fi to cellular doesn't drop it.\n\nMajor browsers and CDNs support HTTP/3 and fall back to HTTP/2 when UDP is blocked.",
+      "keyTerms": [
+        {
+          "term": "Head-of-line blocking",
+          "def": "One delayed item holding up everything queued behind it."
+        },
+        {
+          "term": "QUIC",
+          "def": "A UDP-based transport with built-in streams and TLS 1.3."
+        },
+        {
+          "term": "Multiplexing",
+          "def": "Carrying several independent streams over one connection."
+        }
+      ],
+      "tags": [
+        "http",
+        "networking"
+      ]
+    },
+    {
+      "id": "int-net-04",
+      "promptMd": "Users intermittently get `504 Gateway Timeout` pages. The response comes from your load balancer, not from your app. What does that status tell you?",
+      "choices": [
+        "The load balancer forwarded the request, but no response came back in time",
+        "The load balancer couldn't find any healthy backend to send the request to",
+        "A backend sent the load balancer a malformed or invalid response",
+        "The client took too long to send its request, so the server gave up waiting"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "A gateway or proxy returns `504` when it waited for the upstream server and gave up. Look for slow backend requests (database queries, downstream calls), and compare the backend's timeouts with the load balancer's.",
+      "choiceNotesMd": [
+        "Correct: the upstream accepted the request but didn't answer within the proxy's timeout.",
+        "No healthy targets usually produces `503 Service Unavailable`.",
+        "An invalid upstream response (or a refused or reset connection) is `502 Bad Gateway`.",
+        "A client that's too slow to send its request gets `408 Request Timeout`."
+      ],
+      "topicMd": "**5xx codes at a proxy or load balancer.**\n\n- **500 Internal Server Error**: usually produced by your app itself (an unhandled exception) and passed through.\n- **502 Bad Gateway**: the proxy got an invalid response from upstream, or the connection failed or was reset (the app crashed, the wrong port, an upstream closing a keep-alive connection the proxy reused).\n- **503 Service Unavailable**: no capacity, no healthy targets, or deliberate load shedding; often sent with `Retry-After`.\n- **504 Gateway Timeout**: the upstream didn't respond within the proxy's timeout.\n\n---\n\n**Debugging a 504:**\n\n1. Check the load balancer's logs for which target was slow and how long it took.\n2. Check the backend's latency for those requests: slow queries, a slow dependency, exhausted thread or connection pools.\n3. Line up the timeouts: each layer's timeout should be a bit **shorter** than the layer in front of it, so the inner layer fails first with a clear error instead of being cut off.\n\nA classic cause of intermittent 502s: the backend's keep-alive idle timeout is shorter than the load balancer's, so the backend closes connections the balancer is about to reuse.",
+      "keyTerms": [
+        {
+          "term": "502 Bad Gateway",
+          "def": "The proxy got an invalid response, or none, from the upstream."
+        },
+        {
+          "term": "504 Gateway Timeout",
+          "def": "The proxy gave up waiting for the upstream to respond."
+        },
+        {
+          "term": "Upstream",
+          "def": "The server a proxy or load balancer forwards requests to."
+        }
+      ],
+      "tags": [
+        "http",
+        "load balancing"
+      ]
+    },
+    {
+      "id": "int-api-01",
+      "promptMd": "Your public JSON API has many clients you don't control. Which change is **backward compatible**?",
+      "choices": [
+        "Renaming the response field `userName` to `username` for consistency",
+        "Making a previously optional request field `country` required",
+        "Adding a new optional field `nickname` to the response objects",
+        "Changing `id` in responses from a number to a string"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Clients written to ignore fields they don't know aren't affected by an extra optional response field. Renaming fields, tightening requirements or changing types breaks clients that rely on the old contract.",
+      "choiceNotesMd": [
+        "Clients reading `userName` suddenly get nothing. Add the new name alongside the old one and deprecate instead.",
+        "Requests that worked yesterday now fail validation.",
+        "Correct: additive changes are safe, as long as clients ignore unknown fields.",
+        "Clients that parse the id as a number break, even though the digits are the same."
+      ],
+      "topicMd": "**Evolving an API without breaking clients.**\n\nUsually **safe** (additive):\n\n- New endpoints, new optional request parameters, new response fields.\n- Relaxing validation (accepting more inputs).\n\nUsually **breaking**:\n\n- Removing or renaming fields, endpoints or parameters.\n- Changing a field's type, format or meaning (number to string, cents to dollars).\n- Making optional inputs required, or tightening validation.\n- Adding an enum value that clients must handle (a `switch` with no default may crash), so document up front that enums can grow.\n- Changing default behaviour, error codes or pagination.\n\n---\n\n**Practices:**\n\n- Clients follow the **tolerant reader** rule: ignore unknown fields and don't depend on field order.\n- Version breaking changes explicitly (`/v2/...`, a version header, or dated versions) and run old and new side by side.\n- **Deprecate** before removing: announce it, add `Deprecation` and `Sunset` headers, watch usage of the old field, then remove it.\n- Consumer-driven contract tests catch accidental breaks before release.",
+      "keyTerms": [
+        {
+          "term": "Backward compatible",
+          "def": "Existing clients keep working without changes."
+        },
+        {
+          "term": "Tolerant reader",
+          "def": "A client that ignores data it doesn't understand."
+        },
+        {
+          "term": "Deprecation",
+          "def": "Announcing that something will be removed, before removing it."
+        }
+      ],
+      "tags": [
+        "api design",
+        "versioning"
+      ]
+    },
+    {
+      "id": "int-api-02",
+      "promptMd": "`GET /users/42` returns `{\"name\": \"Ana\", \"email\": \"ana@old.example\", \"plan\": \"pro\"}`. A client sends `PUT /users/42` with the body `{\"email\": \"ana@new.example\"}`. Under standard HTTP semantics, what should the stored user look like afterwards?",
+      "choices": [
+        "`email` is updated, and `name` and `plan` keep their previous values",
+        "Nothing changes, because `PUT` may only create resources, never update them",
+        "Only `email` is set; `name` and `plan` are removed or reset to defaults",
+        "A second user is created, because `PUT` isn't idempotent"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "`PUT` replaces the whole resource with the representation sent, so fields left out are gone (many APIs reject an incomplete `PUT` with `400` instead). To change just one field, use `PATCH`.",
+      "choiceNotesMd": [
+        "That's partial-update behaviour, which is what `PATCH` is for.",
+        "`PUT` creates *or replaces* the resource at that URL.",
+        "Correct: `PUT` means \"make the resource look exactly like this\".",
+        "`PUT` is idempotent: sending the same body twice leaves the same state."
+      ],
+      "topicMd": "**PUT vs PATCH vs POST.**\n\n- **`PUT /users/42`**: replace the resource at this URL with the request body (or create it there). Sending it twice gives the same result, so it's **idempotent** and safe to retry.\n- **`PATCH /users/42`**: apply a partial change. The body describes the change, for example as **JSON Merge Patch** (`{\"email\": \"x\"}`, where `null` deletes a field) or **JSON Patch** (a list of operations such as `{\"op\": \"replace\", \"path\": \"/email\", \"value\": \"x\"}`). Not guaranteed idempotent: an `add` to an array appends twice.\n- **`POST /users`**: create a subordinate resource whose URL the server picks, or trigger an action. Not idempotent, so use an idempotency key if clients retry.\n\n---\n\n**Practical points:**\n\n- A client doing read-modify-write with `PUT` can overwrite someone else's change. Send `If-Match` with the `ETag` it read, and the server returns `412 Precondition Failed` if the resource changed in between.\n- Be explicit about what a missing field means in a `PATCH` (unchanged) versus `null` (cleared).\n- Return the updated resource (or `204 No Content`) so clients don't need another `GET`.",
+      "keyTerms": [
+        {
+          "term": "PUT",
+          "def": "Replace the resource at a URL with the request body."
+        },
+        {
+          "term": "PATCH",
+          "def": "Apply a partial modification to a resource."
+        },
+        {
+          "term": "JSON Merge Patch",
+          "def": "A PATCH format where the body lists only the fields to change."
+        }
+      ],
+      "tags": [
+        "rest",
+        "http"
+      ]
+    },
+    {
+      "id": "int-api-03",
+      "promptMd": "What's the standard way for an HTTP API to expose an operation that takes **several minutes**, such as generating a large report, when clients may sit behind proxies with 60-second timeouts?",
+      "choices": [
+        "Keep the request open and stream progress bytes so proxies don't time out",
+        "Return `201 Created` at once with an empty report that clients re-fetch later",
+        "Return `202 Accepted` with a status URL the client can poll for the result",
+        "Ask clients to raise their HTTP timeout to 15 minutes for this endpoint"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "`202 Accepted` says the work was queued but isn't done. Return a job resource (`Location: /reports/jobs/123`) whose status the client polls, or notify it with a webhook when the report is ready.",
+      "choiceNotesMd": [
+        "Fragile: any proxy, load balancer or mobile network can still cut a long-lived request, and a dropped connection loses the result.",
+        "201 claims the report exists, which misleads clients; a job resource says honestly what's going on.",
+        "Correct: the asynchronous request-reply pattern. The client polls the status resource, which links to the finished report.",
+        "You don't control every proxy and network hop, and long-held requests tie up server resources."
+      ],
+      "topicMd": "**Long-running operations in HTTP APIs.** Keep requests short and move slow work to the background:\n\n1. `POST /reports` validates the input, enqueues a job, and returns **`202 Accepted`** with `Location: /reports/jobs/123` (and maybe `Retry-After: 5`).\n2. `GET /reports/jobs/123` returns the status: `queued`, `running` (with progress), `succeeded` with a link to the result, or `failed` with an error.\n3. The client polls with backoff, or registers a **webhook** to be called when the job finishes.\n\n---\n\n**Design details:**\n\n- Accept an **idempotency key** on the `POST`, so a retried request doesn't start a second job.\n- Make jobs **cancellable** (`DELETE` the job, or `POST .../cancel`) and give results an expiry.\n- Run workers from a queue so spikes don't overload the API servers, and make jobs safe to retry if a worker crashes halfway.\n- For live progress in a browser, server-sent events or WebSockets can complement polling.\n\nCloud APIs use the same pattern (Google's long-running operations, Azure's asynchronous operations), so naming it shows you know the convention.",
+      "keyTerms": [
+        {
+          "term": "202 Accepted",
+          "def": "The request was accepted for processing, which isn't finished yet."
+        },
+        {
+          "term": "Polling",
+          "def": "The client repeatedly asking for a job's status."
+        },
+        {
+          "term": "Webhook",
+          "def": "An HTTP callback the server makes to notify a client of an event."
+        }
+      ],
+      "tags": [
+        "api design",
+        "rest"
+      ]
+    },
+    {
+      "id": "int-api-04",
+      "promptMd": "When is **gRPC** usually a better choice than a JSON REST API?",
+      "choices": [
+        "For a public API that third-party developers call straight from browsers",
+        "When responses should be cached by CDNs and browsers using standard HTTP caching",
+        "When clients need to explore the API by hand with `curl` and read the responses",
+        "For internal service-to-service calls that want typed contracts and streaming"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "gRPC sends Protocol Buffers over HTTP/2: compact binary messages, generated typed clients in many languages, deadlines, and bidirectional streaming. Those suit internal microservice traffic; public, browser-facing and cache-friendly APIs usually stay with REST or GraphQL.",
+      "choiceNotesMd": [
+        "Browsers can't speak native gRPC; they need gRPC-Web and a proxy, which adds friction for third parties.",
+        "gRPC calls are POSTs to a method path, so CDNs and browser caches don't cache them; a REST `GET` with `Cache-Control` can be cached.",
+        "Binary payloads are hard to read by hand; tools like `grpcurl` help, but JSON is friendlier.",
+        "Correct: schema-first contracts, efficient encoding and streaming are gRPC's strengths between services you control."
+      ],
+      "topicMd": "**REST vs gRPC vs GraphQL.**\n\n**REST (JSON over HTTP)**: resources and standard methods. Universal tooling, human-readable, works in every browser, and `GET`s can be cached by CDNs. Contracts are typically described with OpenAPI.\n\n**gRPC**: remote procedure calls defined in `.proto` files, encoded with **Protocol Buffers** and carried over HTTP/2. Strengths: generated, strongly typed clients and servers; small, fast payloads; built-in deadlines and cancellation; client, server and bidirectional **streaming**. Weaknesses: it needs gRPC-Web plus a proxy in browsers, isn't HTTP-cacheable, and is harder to debug by hand.\n\n**GraphQL**: one endpoint where clients ask for exactly the fields they need, which helps varied front-ends avoid over-fetching. Costs: HTTP caching is harder, and servers must guard against expensive queries (depth and complexity limits) and N+1 resolvers.\n\n---\n\nA common architecture uses all three: gRPC between internal services, a REST or GraphQL API at the edge for web and mobile clients, and a gateway translating between them. Whatever you pick, schema evolution rules matter: in Protobuf, never reuse a field number, and add new fields instead of changing old ones.",
+      "keyTerms": [
+        {
+          "term": "gRPC",
+          "def": "An RPC framework using Protocol Buffers over HTTP/2."
+        },
+        {
+          "term": "Protocol Buffers",
+          "def": "A compact binary serialization format with a schema language."
+        },
+        {
+          "term": "GraphQL",
+          "def": "A query language letting clients request exactly the fields they need."
+        }
+      ],
+      "tags": [
+        "apis",
+        "api design"
+      ]
+    },
+    {
+      "id": "int-sec-01",
+      "promptMd": "A logged-in customer notices that changing the URL from `/invoices/1041` to `/invoices/1042` shows **another customer's** invoice. What's the right fix?",
+      "choices": [
+        "Switch invoice ids to random UUIDs so nobody can guess them",
+        "Check on the server that the invoice belongs to the requesting user",
+        "Rate-limit the invoices endpoint so enumerating ids takes far longer",
+        "Encrypt the invoice id in the URL so customers can't edit it"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "This is an **IDOR** (broken object-level authorization): the server authenticates the user but never checks that they may access *this* object. Every request for a specific record must verify ownership or permission on the server.",
+      "choiceNotesMd": [
+        "Unguessable ids make attacks harder, but any leaked id (in a log, an email, a shared link) still works. Defence in depth, not the fix.",
+        "Correct: authorize per object, e.g. `WHERE id = ? AND customer_id = ?`, or a policy check before returning the record.",
+        "That slows enumeration down but still serves every invoice the attacker asks for.",
+        "Encrypted ids can still be replayed or leaked; the server must still check who's asking."
+      ],
+      "topicMd": "**Broken object-level authorization (BOLA, also called IDOR)** tops the OWASP API Security Top 10. The app checks *who you are* (authentication) but not *whether you may access this particular object* (authorization), so swapping an id in a URL, a request body or a GraphQL query exposes someone else's data.\n\n**Fixes:**\n\n- Enforce ownership on every data access: scope queries to the caller (`WHERE id = ? AND tenant_id = ?`), or run a central policy check (`can(user, \"read\", invoice)`) before returning or modifying a record.\n- Put authorization in one shared layer (middleware, or repository methods that require a user context) rather than remembering it in each handler.\n- Return `404` rather than `403` for objects the user can't see, so you don't confirm they exist.\n- Write tests that call endpoints as user A with user B's ids.\n\n---\n\nRandom ids, hidden fields and client-side checks are **obscurity**, not authorization. They're fine as extra layers, but the server must decide every time. Multi-tenant systems can add database **row-level security** as a backstop.",
+      "keyTerms": [
+        {
+          "term": "IDOR",
+          "def": "Insecure direct object reference: access to objects by id without an ownership check."
+        },
+        {
+          "term": "Authorization",
+          "def": "Deciding what an authenticated user is allowed to do."
+        },
+        {
+          "term": "Row-level security",
+          "def": "Database policies restricting which rows each user can see."
+        }
+      ],
+      "tags": [
+        "security",
+        "auth"
+      ]
+    },
+    {
+      "id": "int-sec-02",
+      "promptMd": "Your app generates link previews: users paste a URL and your **server** fetches it. A user submits `http://169.254.169.254/latest/meta-data/`. What attack is this, and what's the main defence?",
+      "choices": [
+        "XSS; escape the fetched page's HTML before rendering the preview",
+        "SSRF; block private and internal addresses after resolving DNS",
+        "CSRF; require an anti-forgery token on the link preview form",
+        "SQL injection; pass the URL to the database as a bound parameter"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "That address is the cloud metadata service, reachable only from inside your network, and it can hand out credentials. In **server-side request forgery**, the attacker makes your server request internal resources, so validate destinations on the server, including after DNS resolution and on every redirect.",
+      "choiceNotesMd": [
+        "Escaping matters when displaying the preview, but the damage here happens when your server makes the request.",
+        "Correct: deny private, loopback and link-local ranges (checking the resolved IP and every redirect), and use IMDSv2 on AWS.",
+        "The attacker is a legitimate user submitting their own request; no cross-site request is being forged.",
+        "Nothing here reaches a SQL query; the URL is used to make an outbound HTTP request."
+      ],
+      "topicMd": "**Server-side request forgery (SSRF).** Any feature where your server fetches a user-supplied URL (link previews, webhooks, image import, PDF rendering) can be turned against your internal network. Targets include cloud metadata endpoints (`169.254.169.254`, which can return temporary credentials), admin panels on `localhost`, and internal services that trust anything inside the network.\n\n---\n\n**Defences, layered:**\n\n- **Allowlist** destinations where you can (specific hosts for webhooks).\n- Otherwise, resolve the hostname and **reject private, loopback and link-local addresses** (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, and the IPv6 equivalents). Connect to the exact IP you checked, to defeat **DNS rebinding**, and re-check on every redirect.\n- Allow only the `http` and `https` schemes (no `file://` or `gopher://`).\n- Run fetchers in an isolated network segment, or through an egress proxy that enforces the rules.\n- On AWS, require **IMDSv2**, whose session tokens need a `PUT` request with a custom header that simple SSRF can't send.\n\nCapital One's 2019 breach involved SSRF against the metadata service.",
+      "keyTerms": [
+        {
+          "term": "SSRF",
+          "def": "Tricking a server into making requests to destinations the attacker chooses."
+        },
+        {
+          "term": "Metadata service",
+          "def": "A cloud endpoint giving instances their configuration and credentials."
+        },
+        {
+          "term": "DNS rebinding",
+          "def": "A hostname resolving to a safe IP when checked and an internal IP when used."
+        }
+      ],
+      "tags": [
+        "security"
+      ]
+    },
+    {
+      "id": "int-sec-03",
+      "promptMd": "A webhook receiver checks a request's HMAC signature with `if computed == provided`, using an ordinary string comparison. Why do security guides say to use a **constant-time** comparison instead?",
+      "choices": [
+        "It treats hex strings case-insensitively, so some forged signatures will match",
+        "It stops at the first wrong byte, so timing reveals how much of a guess matched",
+        "Constant-time comparison is faster when many webhooks arrive at the same moment",
+        "Plain comparison can't handle the raw binary bytes that HMAC produces"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "An early-exit comparison takes slightly longer the more leading bytes are right. With enough requests an attacker can measure that and recover a valid signature byte by byte; a constant-time comparison always takes the same time.",
+      "choiceNotesMd": [
+        "String equality is case-sensitive in mainstream languages; the leak is in the timing, not the matching rules.",
+        "Correct: a timing side channel. Constant-time comparison examines every byte regardless of where they differ.",
+        "It's usually slightly slower; its value is that the time doesn't depend on the secret.",
+        "Comparing byte arrays works fine; the issue is how long the comparison takes."
+      ],
+      "topicMd": "**Timing attacks.** If how long an operation takes depends on secret data, an attacker can learn the secret by measuring. A typical equality check returns as soon as two bytes differ, so a guess with a correct first byte takes a little longer than one with a wrong first byte. Network jitter hides single measurements, but statistics over many requests can reveal the difference.\n\n**Where it matters:** comparing HMAC signatures, API keys, password-reset tokens, session tokens, or anything an attacker can submit repeatedly that must match a secret.\n\n---\n\n**Defences:**\n\n- Use a constant-time comparison from a crypto library (`hmac.compare_digest` in Python, `MessageDigest.isEqual` in Java, `crypto.timingSafeEqual` in Node.js, `CRYPTO_memcmp` in OpenSSL).\n- Compare fixed-length values such as hashes, rather than raw secrets of varying length.\n- Rate-limit verification attempts.\n\n**Verifying webhooks properly:** recompute the HMAC over the **raw** request body with the shared secret, compare in constant time, and check a signed timestamp (rejecting anything older than a few minutes) so captured requests can't be replayed.",
+      "keyTerms": [
+        {
+          "term": "Timing attack",
+          "def": "Inferring secrets from how long operations take."
+        },
+        {
+          "term": "HMAC",
+          "def": "A keyed hash that proves a message came from someone holding the secret."
+        },
+        {
+          "term": "Replay attack",
+          "def": "Re-sending a captured valid request to repeat its effect."
+        }
+      ],
+      "tags": [
+        "security"
+      ]
+    },
+    {
+      "id": "int-sec-04",
+      "promptMd": "Why should a web app issue a **new session id** at the moment a user logs in, instead of keeping the session id they had while anonymous?",
+      "choices": [
+        "So the browser's cache won't serve pages that belonged to the anonymous session",
+        "So the server can free the memory held by the anonymous session",
+        "So the new session cookie can be marked `Secure` and `HttpOnly`",
+        "So an attacker who planted or learned the old id can't use it afterwards"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "In **session fixation**, an attacker gets the victim to use a session id the attacker knows (through a link or a planted cookie). If that id survives login, the attacker's copy becomes an authenticated session; rotating the id at login (and at other privilege changes) breaks the attack.",
+      "choiceNotesMd": [
+        "Caching is controlled by `Cache-Control` headers, not by the session id.",
+        "Freeing memory is a minor side benefit; security is the reason.",
+        "Cookie flags can be set on any cookie at any time; they're independent of rotation.",
+        "Correct: rotate on every privilege change (login, elevation to admin) and invalidate the old id on the server."
+      ],
+      "topicMd": "**Session management basics.**\n\n- **Rotate session ids at login** and at any privilege change, and invalidate the old id on the server. This defeats **session fixation**, where an attacker sets the victim's session id in advance and waits for them to log in.\n- **Generate ids with a cryptographically secure random generator**, with at least 128 bits, so they can't be guessed.\n- **Cookie flags**: `Secure` (HTTPS only), `HttpOnly` (no JavaScript access), `SameSite=Lax` or `Strict` (limits cross-site sending), and a narrow `Path` and `Domain`.\n- **Expiry**: an idle timeout and an absolute lifetime, shorter for sensitive apps.\n\n---\n\n- **Logout** must destroy the session on the server, not just delete the cookie.\n- **Sensitive actions** (changing a password or email, making payments) should require re-authentication.\n- Never put session ids in URLs: they leak through `Referer` headers, logs and shared links.\n\nStateless tokens such as JWTs make logout and rotation harder, since the server can't simply delete them; short lifetimes plus refresh-token rotation are the usual compromise.",
+      "keyTerms": [
+        {
+          "term": "Session fixation",
+          "def": "Forcing a victim to use a session id the attacker already knows."
+        },
+        {
+          "term": "Session rotation",
+          "def": "Issuing a new session id and invalidating the old one."
+        },
+        {
+          "term": "SameSite",
+          "def": "Cookie attribute limiting when the browser sends it on cross-site requests."
+        }
+      ],
+      "tags": [
+        "security",
+        "auth"
+      ]
+    },
+    {
+      "id": "int-conc-01",
+      "promptMd": "Why is waiting on a condition variable written as `while (!ready) cond.wait(lock)` rather than `if (!ready) cond.wait(lock)`?",
+      "choices": [
+        "`wait` returns immediately the first time, so the loop makes it block",
+        "A thread can wake up while the condition is still false, so it must re-check",
+        "The loop keeps the lock held for longer, which prevents other threads from starving",
+        "An `if` would release the lock forever, so no other thread could signal"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "A wake-up doesn't guarantee the condition holds: waits can return spuriously, and another thread may take the item between the signal and this thread reacquiring the lock. Re-checking in a loop handles both.",
+      "choiceNotesMd": [
+        "`wait` blocks until it's notified (or spuriously woken); it doesn't skip the first call.",
+        "Correct: spurious wake-ups are allowed by POSIX, Java and C++, and stolen wake-ups happen whenever there are several waiters.",
+        "`wait` releases the lock while sleeping in both versions; the loop is about correctness, not fairness.",
+        "`wait` atomically releases the lock and reacquires it before returning, with `if` or with `while`."
+      ],
+      "topicMd": "**Condition variables** let a thread sleep until some state changes, without busy-waiting. The pattern always has three parts: a **mutex**, a **shared condition** (a predicate on some state), and the **condition variable**.\n\n```\nlock(m)\nwhile (!predicate) wait(cv, m)   // releases m while sleeping\n... use the state ...\nunlock(m)\n```\n\nThe signalling side changes the state **while holding the mutex**, then calls `notify_one` or `notify_all`.\n\n---\n\n**Why the loop is mandatory:**\n\n- **Spurious wake-ups**: implementations may return from `wait` with no notify at all (POSIX, Java and C++ all permit it).\n- **Stolen wake-ups**: with several consumers, another thread can take the item before this one reacquires the lock.\n- **notify_all**: wakes every waiter, but only some of them can proceed.\n\nC++ offers `cv.wait(lock, pred)`, which loops for you, and Java's documentation shows the `while` loop explicitly. Higher-level tools (blocking queues, semaphores, futures, channels) wrap this pattern and are usually the better choice in application code.",
+      "keyTerms": [
+        {
+          "term": "Condition variable",
+          "def": "Lets threads sleep until another thread signals that state changed."
+        },
+        {
+          "term": "Spurious wake-up",
+          "def": "A wait returning even though no thread signalled."
+        },
+        {
+          "term": "Predicate",
+          "def": "The condition on shared state that a waiting thread needs to be true."
+        }
+      ],
+      "tags": [
+        "concurrency",
+        "threads"
+      ]
+    },
+    {
+      "id": "int-conc-02",
+      "promptMd": "Two threads each need locks A and B. Each grabs one, fails to get the other with `tryLock`, releases what it holds, and immediately tries again. Both stay busy, yet **neither ever finishes**. What is this called?",
+      "choices": [
+        "Livelock",
+        "Deadlock",
+        "Starvation",
+        "A data race"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "In a **livelock**, threads aren't blocked; they keep reacting to each other in a way that makes no progress. A random backoff before retrying, or a fixed lock order, breaks the symmetry.",
+      "choiceNotesMd": [
+        "Correct: active but making no progress, like two people in a corridor who keep stepping aside in the same direction.",
+        "In a deadlock, threads are blocked waiting forever; here they keep running and releasing locks.",
+        "Starvation is one thread being passed over while others make progress; here nobody progresses.",
+        "A data race is unsynchronized access to shared memory; these threads use locks correctly, just unproductively."
+      ],
+      "topicMd": "**Liveness failures** are bugs where the program stops making progress, rather than producing wrong results:\n\n- **Deadlock**: a cycle of threads, each blocked waiting for a resource another holds. Nothing runs. Prevent it by acquiring locks in one global order, or by using timeouts.\n- **Livelock**: threads keep changing state in response to each other, so they run but never progress. Typical with naive retry-on-conflict. Fix it with **randomized backoff**, or by giving one side priority.\n- **Starvation**: some thread never gets the resource because others keep winning (unfair locks, low priority). Fix it with fair locks or queues.\n\n---\n\n**Related: priority inversion.** A high-priority task waits for a lock held by a low-priority task, which a medium-priority task keeps preempting. NASA's Mars Pathfinder lander hit this in 1997, and enabling **priority inheritance** (temporarily boosting the lock holder) fixed it.\n\nThe same patterns appear between services: two clients retrying conflicting transactions in lockstep form a distributed livelock, which is why retry jitter matters there too.",
+      "keyTerms": [
+        {
+          "term": "Livelock",
+          "def": "Threads stay active but keep undoing each other's progress."
+        },
+        {
+          "term": "Starvation",
+          "def": "A thread is perpetually denied a resource that others keep getting."
+        },
+        {
+          "term": "Priority inversion",
+          "def": "A high-priority task stuck behind a lower-priority lock holder."
+        }
+      ],
+      "tags": [
+        "concurrency",
+        "locks"
+      ]
+    },
+    {
+      "id": "int-conc-03",
+      "promptMd": "A service handles each request on a thread from a fixed pool of **8 threads** (on 8 cores). Each request spends about 10 ms on the CPU and then **blocks for 190 ms** on a downstream HTTP call. Throughput tops out near 40 requests/s while CPU usage sits around 5%. What's going on?",
+      "choices": [
+        "Threads mostly sit blocked on I/O, so the pool is too small",
+        "Requests are queuing for the CPU, because 8 threads already use all 8 cores",
+        "Context switching between the 8 threads is consuming most of the time",
+        "The downstream service is overloaded and rejecting most of the requests"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Each thread completes one request per 200 ms, so 8 threads cap out at 8 × 5 = 40 requests/s, while the CPU does only 400 ms of work per second. For blocking I/O, size the pool around cores × (1 + wait/compute), about 8 × 20 = 160 here, or switch to async I/O or virtual threads.",
+      "choiceNotesMd": [
+        "Correct: the pool, not the hardware, is the limit. More threads (or non-blocking I/O) raise throughput until the CPU or the downstream saturates.",
+        "8 threads on 8 cores would only saturate the CPU if they were computing; they're mostly asleep waiting on the network.",
+        "With 8 threads that are mostly asleep, context switches are rare and cheap.",
+        "Rejected calls would return quickly and raise throughput; the numbers match the pool limit exactly."
+      ],
+      "topicMd": "**Sizing thread pools.**\n\n- **CPU-bound work**: about one thread per core (sometimes cores + 1). More threads just add context switches.\n- **I/O-bound work**: threads spend most of their time waiting, so you need many more. A common estimate is **threads ≈ cores × (1 + wait time / compute time)**.\n\n**Little's law** checks the result: requests in flight = throughput × latency. Serving 400 requests/s at 200 ms each needs 80 requests in flight, so at least 80 threads (or async tasks).\n\n---\n\n**Caveats:**\n\n- Downstream limits matter: a bigger pool may just move the queue into the downstream service or its connection pool, so size connection pools to match.\n- Bound the queue in front of the pool and reject (shed load) when it's full, rather than letting latency grow without limit.\n- Alternatives to many OS threads: **async I/O** (event loops, `async`/`await`) or **virtual threads** (Java 21+, Go's goroutines), which make blocking cheap.\n- Measure: CPU utilization, active pool threads and queue length show which resource saturates first.",
+      "keyTerms": [
+        {
+          "term": "Little's law",
+          "def": "Items in a system = arrival rate × time each item spends there."
+        },
+        {
+          "term": "I/O-bound",
+          "def": "Work whose speed is limited by waiting on disks or networks, not the CPU."
+        },
+        {
+          "term": "Virtual threads",
+          "def": "Lightweight threads managed by the runtime, cheap enough to block freely."
+        }
+      ],
+      "tags": [
+        "concurrency",
+        "performance"
+      ]
+    },
+    {
+      "id": "int-conc-04",
+      "promptMd": "Thread A runs `while (!done) { }`. Thread B later sets `done = true`. `done` is a plain boolean, with no lock, atomic or `volatile`. Why might thread A **loop forever**?",
+      "choices": [
+        "The compiler may read `done` once and hoist it out of the loop",
+        "B's write may stay in its own core's cache and never reach A's core",
+        "Booleans aren't written atomically, so A may see a half-written value",
+        "The OS won't schedule B while A is spinning on the same variable"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "With no synchronization there's no happens-before relationship, so the language lets the compiler (or JIT) assume `done` never changes inside the loop and read it only once. Making it atomic or `volatile` (or using a lock) forbids that and guarantees visibility.",
+      "choiceNotesMd": [
+        "Correct: a data race on a plain variable lets the optimizer turn the loop into `if (!done) while (true) {}`.",
+        "Mainstream CPUs keep their caches coherent, so the write does reach other cores; the language-level rules are the problem, not the hardware.",
+        "A boolean write is effectively atomic on real hardware; tearing isn't the issue here.",
+        "On a multicore machine B runs on another core, and even on one core preemption gives it time."
+      ],
+      "topicMd": "**Memory visibility.** Compilers and CPUs reorder and cache memory operations for speed. Within one thread you can't tell, but other threads can observe surprising things: a stale value, or writes appearing in a different order than in the code.\n\nLanguage memory models (Java's, C++11's, Go's) define when one thread's write is guaranteed visible to another: only through a **happens-before** relationship, created by:\n\n- releasing and then acquiring the same **lock**,\n- writing and then reading an **atomic** (or a Java `volatile`) variable,\n- starting or joining a thread, or sending and receiving on a channel.\n\nWithout one, concurrent accesses to shared data are a **data race**: Java gives only weak guarantees, and in C and C++ the behaviour is undefined.\n\n---\n\n**Classic bugs:**\n\n- A stop flag that's never seen (this question).\n- **Unsafe publication**: one thread builds an object and stores a reference; another sees the reference but not the fields' initial values. That's why double-checked locking needs `volatile`.\n\nRule of thumb: every piece of shared mutable state is protected by a lock, made atomic, or not shared at all.",
+      "keyTerms": [
+        {
+          "term": "Happens-before",
+          "def": "A guarantee that one action's effects are visible to another."
+        },
+        {
+          "term": "Data race",
+          "def": "Unsynchronized concurrent access to the same memory, with at least one write."
+        },
+        {
+          "term": "Atomic variable",
+          "def": "A variable whose reads and writes are indivisible and visible across threads."
+        }
+      ],
+      "tags": [
+        "concurrency",
+        "threads"
+      ]
+    },
+    {
+      "id": "int-conc-05",
+      "promptMd": "Node.js and Python's asyncio serve thousands of connections on a single thread. Why does one handler doing a **2-second CPU-heavy calculation** inline stall *every* request while it runs?",
+      "choices": [
+        "The calculation exhausts the connection pool, so new requests can't connect",
+        "The single event-loop thread is busy and can't serve anything else",
+        "Async functions run at a lower priority than CPU work in the runtime's scheduler",
+        "The calculation should be marked `async`, which would let it run in parallel"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "An event loop interleaves many requests on one thread, but only at `await` points. CPU work never yields, so for 2 seconds no other callback runs; move it to a worker thread, a process pool or another service.",
+      "choiceNotesMd": [
+        "No pool is being drained here; new connections wait because the loop never gets back to accept them.",
+        "Correct: cooperative multitasking needs every task to yield quickly. Offload CPU-bound work to worker threads or a process pool.",
+        "There's no priority scheduling; the loop simply can't run anything else until the current callback returns.",
+        "Marking it `async` changes nothing if it never awaits I/O: it still runs on the loop thread from start to finish."
+      ],
+      "topicMd": "**Event loops and blocking.** Node.js, Python's asyncio and similar runtimes serve many connections on **one thread** by switching between tasks whenever one waits for I/O (`await`). This is **cooperative** multitasking: a task gives up the thread only when it awaits.\n\nThat makes them great for I/O-bound work (thousands of idle sockets cost little) and fragile under CPU-heavy or blocking calls:\n\n- Heavy computation: image processing, parsing huge JSON documents, big loops.\n- Synchronous I/O: `readFileSync`, `time.sleep`, a blocking database driver.\n\nWhile such a call runs, every other request waits: latency spikes for everyone, health checks can time out, and timers fire late.\n\n---\n\n**Fixes:**\n\n- Offload CPU work: Node's `worker_threads`, or in Python `run_in_executor` with a process pool (in standard CPython, threads don't speed up CPU-bound code because of the GIL), or a separate job queue.\n- Use async drivers for all I/O, or wrap blocking calls in a thread pool (`asyncio.to_thread`).\n- Break long loops into chunks that yield back to the loop.\n- Monitor **event-loop lag**: how late scheduled callbacks run is a direct signal of blocking.",
+      "keyTerms": [
+        {
+          "term": "Event loop",
+          "def": "A single thread that dispatches callbacks as I/O completes."
+        },
+        {
+          "term": "Cooperative multitasking",
+          "def": "Tasks give up control voluntarily, at await points."
+        },
+        {
+          "term": "Event-loop lag",
+          "def": "How late the loop runs callbacks compared with when they were due."
+        }
+      ],
+      "tags": [
+        "async",
+        "concurrency"
+      ]
+    },
+    {
+      "id": "int-perf-01",
+      "promptMd": "Order these from **fastest to slowest** on a typical modern server:\n\n- **A**: read a value from main memory (RAM)\n- **B**: random seek on a spinning hard disk\n- **C**: random 4 KB read from an NVMe SSD\n- **D**: read a value from the L1 CPU cache",
+      "choices": [
+        "D, C, A, B",
+        "A, D, C, B",
+        "D, A, B, C",
+        "D, A, C, B"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "L1 is about 1 ns, RAM about 100 ns, an NVMe random read tens of microseconds, and a disk seek several milliseconds. Each step is roughly 100 times slower than the one before, or more.",
+      "choiceNotesMd": [
+        "An SSD read crosses the PCIe bus and reads flash, hundreds of times slower than RAM.",
+        "L1 is the fastest memory there is, a few CPU cycles away; RAM is about 100 times slower.",
+        "A disk seek moves a mechanical arm (milliseconds), while an SSD has no moving parts.",
+        "Correct: about 1 ns, 100 ns, 20 to 100 µs, and 5 to 10 ms."
+      ],
+      "topicMd": "**Latency numbers worth knowing** (orders of magnitude; exact values vary by hardware):\n\n| Operation | Rough latency |\n|---|---|\n| L1 cache read | ~1 ns |\n| L2 cache read | ~4 ns |\n| Uncontended mutex lock/unlock | ~20 ns |\n| Main memory read | ~100 ns |\n| NVMe SSD random read | ~20 to 100 µs |\n| Round trip within a datacenter | ~0.1 to 0.5 ms |\n| Spinning disk seek | ~5 to 10 ms |\n| Round trip US to Europe | ~80 to 150 ms |\n\n---\n\n**Why it matters in design:**\n\n- Memory is hundreds to a thousand times faster than SSD, which is why caches (Redis, in-process maps) help so much.\n- A network round trip costs as much as thousands of memory reads, so **batch** calls and avoid chatty protocols (N+1 queries are N round trips).\n- Sequential access beats random access everywhere: CPU caches prefetch, and SSDs and disks stream.\n- Cross-region calls cost ~100 ms each, so keep request paths inside one region and replicate data asynchronously.\n\nThe list is adapted from the \"latency numbers every programmer should know\" popularized by Jeff Dean and Peter Norvig.",
+      "keyTerms": [
+        {
+          "term": "Latency",
+          "def": "How long one operation takes from start to finish."
+        },
+        {
+          "term": "Sequential access",
+          "def": "Reading data in storage order, which caches and devices handle fastest."
+        }
+      ],
+      "tags": [
+        "performance",
+        "memory"
+      ]
+    },
+    {
+      "id": "int-perf-02",
+      "promptMd": "After a deploy, a garbage-collected service (Java, Go or similar) climbs steadily in memory for hours, GC runs more and more often, and **p99 latency doubles** until the instances are restarted. The deploy added a map that caches computed results keyed by request id. What's the most likely cause?",
+      "choices": [
+        "Nothing ever removes map entries, so every result stays reachable",
+        "The garbage collector has a bug that stops it freeing unused objects",
+        "The heap is too small for normal traffic and just needs to be increased",
+        "Request ids are hashed poorly, so the map's lookups slow down over time"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "Garbage collectors only free *unreachable* objects. A map keyed by unique request ids grows forever, so the heap fills with live data, GC runs constantly and frees little, and its pauses push up tail latency.",
+      "choiceNotesMd": [
+        "Correct: a classic managed-language leak. Use a bounded cache with a size limit and TTL, or don't cache per-request data at all.",
+        "Mature collectors almost never leak; when memory grows, look for references your own code still holds.",
+        "Memory grew with uptime, not with load; a bigger heap only delays the restart.",
+        "Even poor hashing wouldn't make memory grow; the map's size is the problem."
+      ],
+      "topicMd": "**Memory leaks in garbage-collected languages.** A GC frees objects that are no longer **reachable** from roots (stacks, static fields, live threads). A leak in Java, Go, C# or Python means your program still holds references it no longer needs.\n\n**Common culprits:**\n\n- **Unbounded caches and maps**, especially keyed by something unique (request id, timestamp, user input).\n- **Listeners and callbacks** registered but never removed.\n- **Static collections** that only grow.\n- **Thread-locals** on pooled threads, and goroutines blocked forever (each holds its stack and everything it references).\n- Map keys whose `equals`/`hashCode` change after insertion, so entries can never be found or removed.\n\n**Symptoms:** heap usage after each full GC trends upward; GC frequency and CPU rise; tail latency grows; eventually an out-of-memory error.\n\n---\n\n**Diagnosing:** take two **heap dumps** some time apart (or use a heap profiler such as Go's `pprof`), compare which object types are growing, then follow the reference chain to the root that keeps them alive.\n\n**Fixing:** bounded caches (a size limit plus a TTL, as in an LRU cache), explicit unregistering, and scoping data to the request that needs it.",
+      "keyTerms": [
+        {
+          "term": "Reachability",
+          "def": "Whether an object can still be reached from a GC root."
+        },
+        {
+          "term": "Heap dump",
+          "def": "A snapshot of every object in memory and what references it."
+        },
+        {
+          "term": "Bounded cache",
+          "def": "A cache with a size limit and eviction, so it can't grow forever."
+        }
+      ],
+      "tags": [
+        "memory",
+        "garbage collection"
+      ]
+    },
+    {
+      "id": "int-perf-03",
+      "promptMd": "A large 2D array of numbers is stored row by row (row-major). Summing it with the outer loop over **rows** is several times faster than with the outer loop over **columns**, even though both do the same arithmetic. Why?",
+      "choices": [
+        "The compiler can only vectorize loops whose outer loop runs over the rows",
+        "Column-by-column access triggers a page fault on every single element",
+        "Column order adds the numbers in a different order, which is slower in floating point",
+        "Row-by-row access reads consecutive addresses, so each cache line is fully used"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Memory moves between RAM and the CPU caches in 64-byte lines. Walking along a row uses every value in each line and lets the prefetcher stream ahead; walking down a column touches a new line for every element.",
+      "choiceNotesMd": [
+        "Compilers vectorize the inner loop, and row order makes that easy, but the main gap comes from cache misses.",
+        "Pages stay resident once loaded; column order misses the CPU cache, not RAM.",
+        "Addition order can change floating-point rounding slightly, but not the speed.",
+        "Correct: spatial locality. Sequential access makes each cache miss bring in several useful values."
+      ],
+      "topicMd": "**Cache locality.** CPUs fetch memory in **cache lines** (typically 64 bytes) and prefetch the lines they predict you'll need next. Code that accesses memory sequentially gets most of its data from cache; code that jumps around waits about 100 ns per miss.\n\n- **Spatial locality**: using data near what you just used (walking an array in order).\n- **Temporal locality**: reusing the same data soon (a small, hot working set).\n\n---\n\n**Where it shows up:**\n\n- **Loop order** over multi-dimensional arrays: iterate in storage order (row-major in C, C++ and NumPy by default; column-major in Fortran, MATLAB and R).\n- **Arrays vs linked structures**: an array of values is contiguous, while a linked list scatters nodes around the heap, so iterating it misses the cache constantly. That's a big reason contiguous vectors often beat linked lists in practice.\n- **Struct of arrays vs array of structs**: if a hot loop reads one field, storing that field contiguously avoids loading the others.\n- **False sharing**: two threads writing different variables on the same cache line slow each other down.\n\nBig-O treats every memory access as equal; real hardware doesn't.",
+      "keyTerms": [
+        {
+          "term": "Cache line",
+          "def": "The fixed-size block (usually 64 bytes) moved between RAM and cache."
+        },
+        {
+          "term": "Spatial locality",
+          "def": "Accessing memory near recently accessed memory."
+        },
+        {
+          "term": "False sharing",
+          "def": "Threads slowing each other by writing different data on one cache line."
+        }
+      ],
+      "tags": [
+        "performance",
+        "memory"
+      ]
+    },
+    {
+      "id": "int-oop-01",
+      "promptMd": "`Square` extends `Rectangle`. To stay square, `Square.setWidth(w)` also sets the height. Code that calls `setWidth(5)` then `setHeight(4)` on a `Rectangle` and expects an area of 20 gets **16** when handed a square. Which principle does this design break?",
+      "choices": [
+        "Single responsibility: `Square` now does two jobs at once",
+        "Open/closed: `Rectangle` had to be modified so it could support squares",
+        "Dependency inversion: callers depend on a concrete class",
+        "Liskov substitution: a `Square` can't stand in for a `Rectangle`"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Subtypes must honour the base type's contract. `Rectangle` promises that width and height are independent; `Square` breaks that promise, so code written against `Rectangle` misbehaves when handed a `Square`.",
+      "choiceNotesMd": [
+        "Keeping its sides equal is one coherent job; the problem is the broken contract.",
+        "Nothing in `Rectangle` changed; the subclass changed what its methods mean.",
+        "Depending on an abstraction wouldn't help; any rectangle abstraction with independent setters has the same issue.",
+        "Correct: the subclass weakens a promise (setting the width leaves the height alone), so it isn't substitutable."
+      ],
+      "topicMd": "**The Liskov substitution principle (LSP):** if code works with a base type, it must keep working with any subtype. A subtype may *extend* behaviour but must not break the base type's **contract**:\n\n- It can't demand more (stronger preconditions), such as rejecting inputs the base accepts.\n- It can't promise less (weaker postconditions), such as `setWidth` also changing the height.\n- It must preserve invariants and not throw new kinds of exceptions callers don't expect.\n\n---\n\n**Classic smells:**\n\n- Overrides that throw `UnsupportedOperationException` (a read-only list that \"is a\" mutable list).\n- Callers checking `if (shape instanceof Square)` to work around a subtype.\n- An *is-a* relationship that holds in the real world (a square *is* a rectangle) but not for the mutable objects in your code.\n\n**Fixes:** make shapes immutable (an immutable `Square` really is a valid `Rectangle`), model both as separate implementations of a `Shape` interface with `area()`, or split interfaces so read-only types don't inherit mutators.\n\nLSP is the L in **SOLID**, alongside single responsibility, open/closed, interface segregation and dependency inversion.",
+      "keyTerms": [
+        {
+          "term": "Liskov substitution",
+          "def": "Subtypes must be usable anywhere their base type is expected."
+        },
+        {
+          "term": "Contract",
+          "def": "What a type requires of callers and promises in return."
+        },
+        {
+          "term": "Invariant",
+          "def": "A condition that must always hold for an object."
+        }
+      ],
+      "tags": [
+        "solid",
+        "oop"
+      ]
+    },
+    {
+      "id": "int-oop-02",
+      "promptMd": "A teammate proposes `class Stack extends ArrayList` so the stack gets storage, `size()` and iteration for free, then adds `push` and `pop`. What's the main problem?",
+      "choices": [
+        "Inheritance is slower than composition because of virtual method dispatch",
+        "A class can't add new public methods on top of the ones it inherits",
+        "Inherited methods like `add(i, x)` let callers bypass LIFO order",
+        "`ArrayList` grows by copying, so a stack built on it can't be efficient"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Inheritance exposes the parent's whole public interface, so the stack can't protect its own invariant. Wrapping a list in a private field (composition) exposes only `push`, `pop` and `peek`.",
+      "choiceNotesMd": [
+        "Dispatch costs are negligible, and composition makes calls too; the issue is design, not speed.",
+        "Subclasses add methods all the time; that part is fine.",
+        "Correct: the subclass inherits operations that violate its invariant. Java's own `Stack extends Vector` is a well-known example of this mistake.",
+        "Amortized O(1) appends and removals at the end make an array list a fine backing store for a stack."
+      ],
+      "topicMd": "**Composition over inheritance.** Inheritance says *is-a*: a subclass is usable anywhere its parent is, and it takes on the parent's entire public interface and implementation details. Composition says *has-a*: a class holds another object privately and exposes only what it chooses.\n\nProblems with inheriting just to reuse code:\n\n- **Leaky interface**: callers can use parent methods that break your invariants.\n- **Fragile base class**: changes in the parent (a method that now calls another overridable method) can silently break subclasses.\n- **Tight coupling**: you can't swap the implementation later without changing the type hierarchy.\n\n---\n\n**The composition version:**\n\n```\nclass Stack:\n    private items = new List()\n    push(x): items.append(x)\n    pop(): return items.removeLast()\n```\n\nPrefer inheritance for a true, substitutable *is-a* relationship that was designed for extension (implementing an interface, or extending a framework's abstract base class). Prefer composition, often plus an interface, when you just want to reuse behaviour. Java's `Stack extends Vector` and `Properties extends Hashtable` are standard-library examples the designers later regretted; `Deque` is the recommended stack today.",
+      "keyTerms": [
+        {
+          "term": "Composition",
+          "def": "Building a class from other objects it holds, instead of inheriting."
+        },
+        {
+          "term": "Fragile base class",
+          "def": "Parent-class changes unexpectedly breaking subclasses."
+        },
+        {
+          "term": "LIFO",
+          "def": "Last in, first out: the order a stack must preserve."
+        }
+      ],
+      "tags": [
+        "oop",
+        "object-oriented design"
+      ]
+    },
+    {
+      "id": "int-oop-03",
+      "promptMd": "You want to add logging, caching and retries around a `PaymentClient` **without changing its code**, and be able to combine any subset of them in any order. Which pattern fits best?",
+      "choices": [
+        "Adapter",
+        "Factory method",
+        "Template method",
+        "Decorator"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "A decorator implements the same interface as the object it wraps and adds behaviour before or after delegating. Because each wrapper is itself a `PaymentClient`, you can stack them: `Retrying(Logging(Caching(real)))`.",
+      "choiceNotesMd": [
+        "An adapter converts one interface into a *different* one; here the interface stays the same.",
+        "A factory method decides which object to create; it doesn't layer behaviour around calls (though a factory might assemble the stack of decorators).",
+        "Template method fixes an algorithm's skeleton in a base class and lets subclasses fill in steps; it relies on inheritance and doesn't combine freely.",
+        "Correct: same interface, added behaviour, freely composable wrappers."
+      ],
+      "topicMd": "**The Decorator pattern** wraps an object in another object with the **same interface**, adding behaviour around the delegated call.\n\n```\ninterface PaymentClient { charge(req) }\n\nclass LoggingClient implements PaymentClient:\n    constructor(inner: PaymentClient)\n    charge(req):\n        log(\"charging\", req.id)\n        return inner.charge(req)\n```\n\nBecause the wrappers and the real client share one interface, callers can't tell them apart, and you can stack wrappers in any combination without a subclass for every mix (`LoggingRetryingClient`, `CachingLoggingClient`, and so on).\n\n---\n\n**Where you've seen it:** Java's I/O streams (`BufferedInputStream` wrapping a `FileInputStream`), HTTP middleware chains, client interceptors in gRPC and HTTP libraries, and Python's function decorators (the same idea applied to functions).\n\n**Related patterns that are often confused with it:**\n\n- **Adapter**: changes the interface into the one the caller expects.\n- **Proxy**: same interface, but controls *access* (lazy loading, remote calls, permissions) rather than adding features.\n- **Facade**: a simpler interface over a whole subsystem.\n\nDecorators follow the **open/closed principle**: new behaviour comes from new classes, not from editing the client.",
+      "keyTerms": [
+        {
+          "term": "Decorator",
+          "def": "A wrapper with the same interface that adds behaviour around calls."
+        },
+        {
+          "term": "Adapter",
+          "def": "A wrapper that converts one interface into another."
+        },
+        {
+          "term": "Proxy",
+          "def": "A stand-in with the same interface that controls access to the real object."
+        }
+      ],
+      "tags": [
+        "design patterns"
+      ]
+    },
+    {
+      "id": "int-oop-04",
+      "promptMd": "`ShippingCalculator.cost(order)` contains a growing `switch` on the carrier (`UPS`, `FEDEX`, `DHL`, ...), and every new carrier means editing and re-testing this class. Which refactoring best follows the **open/closed principle**?",
+      "choices": [
+        "Give each carrier its own class behind one `ShippingRate` interface",
+        "Move the `switch` into a static helper method that every caller shares",
+        "Replace the `switch` with an `if`/`else` chain that's easier to extend",
+        "Store each carrier's rate formula as a string and evaluate it at runtime"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "With a `ShippingRate` interface and one implementation per carrier (the **Strategy** pattern), adding a carrier means adding a class and registering it, without touching existing, tested code.",
+      "choiceNotesMd": [
+        "Correct: open for extension (new strategies), closed for modification (the calculator doesn't change).",
+        "Same `switch`, new location: it still has to be edited for every carrier.",
+        "That's just different syntax for the same conditional, with the same edit-every-time problem.",
+        "Strings evaluated at runtime lose type checking and testability, and they're a code-injection risk."
+      ],
+      "topicMd": "**Open/closed principle (OCP):** software should be *open for extension, closed for modification*. Adding a new variant shouldn't require editing code that already works.\n\nA `switch` on a type code, especially one repeated in several places, is the classic violation: every new case means finding and editing each `switch`.\n\n**Strategy pattern:** define an interface for the behaviour that varies, and one class per variant.\n\n```\ninterface ShippingRate { cost(order) }\nclass UpsRate implements ShippingRate { ... }\nclass DhlRate implements ShippingRate { ... }\n\nrates = { \"UPS\": UpsRate(), \"DHL\": DhlRate() }\ntotal = rates[order.carrier].cost(order)\n```\n\n---\n\n**Benefits:** each carrier is tested in isolation, teams can add carriers in parallel, and the calculator depends only on the interface.\n\n**Don't overdo it:** OCP is about the axes of change you actually see. A `switch` over three stable cases is fine; introduce strategies when variants keep arriving. In a functional style, a map from key to function achieves the same thing with less ceremony.\n\nThe same move, *replace conditional with polymorphism*, is a standard refactoring in Martin Fowler's catalogue.",
+      "keyTerms": [
+        {
+          "term": "Open/closed principle",
+          "def": "Extend behaviour by adding code, not by modifying working code."
+        },
+        {
+          "term": "Strategy pattern",
+          "def": "Interchangeable algorithms behind a common interface."
+        },
+        {
+          "term": "Polymorphism",
+          "def": "One interface, many implementations chosen at runtime."
+        }
+      ],
+      "tags": [
+        "solid",
+        "design patterns"
+      ]
+    },
+    {
+      "id": "int-oop-05",
+      "promptMd": "`OrderService` creates `new SmtpEmailSender()` inside its constructor, so every unit test of `OrderService` tries to send real email. What's the cleanest fix?",
+      "choices": [
+        "Inject an `EmailSender` interface via the constructor; tests pass a fake",
+        "Add an `isTest` flag to `OrderService` that skips sending email during tests",
+        "Make `SmtpEmailSender` a singleton that tests can reset between runs",
+        "Point the SMTP host at a local mail server whenever the tests are run"
+      ],
+      "answerIndex": 0,
+      "explanationMd": "This is **dependency injection**: `OrderService` depends on an abstraction it receives instead of constructing a concrete class. Production wiring passes the SMTP sender; tests pass a fake that records messages.",
+      "choiceNotesMd": [
+        "Correct: the dependency inversion principle in practice, and it makes the dependency visible in the constructor.",
+        "Test-only branches in production code are easy to get wrong, and they leave the real path untested.",
+        "A singleton is still a hidden global dependency, and it adds shared state between tests.",
+        "Useful for integration tests, but unit tests shouldn't need a mail server at all."
+      ],
+      "topicMd": "**Dependency injection (DI) and testability.** When a class constructs its own collaborators (`new SmtpEmailSender()`, `new PostgresRepo()`, a call to the system clock), it's welded to them: tests can't substitute anything, and the class's real dependencies are hidden inside it.\n\n**Constructor injection** fixes both:\n\n```\nclass OrderService:\n    constructor(email: EmailSender, repo: OrderRepo, clock: Clock)\n```\n\n- In production, a composition root (`main`, or a DI framework such as Spring or Guice) builds the real implementations and wires them up.\n- In tests, you pass **fakes**: an in-memory repo, a fake clock, an email sender that records messages.\n\nThis is the **dependency inversion principle** (the D in SOLID): high-level policy depends on abstractions, and low-level details implement them.\n\n---\n\n**Testability smells:**\n\n- `new` of infrastructure classes inside business logic.\n- Static calls and singletons for I/O, time or randomness.\n- Long constructor parameter lists, which usually mean the class does too much (split it).\n\nYou don't need a framework: passing arguments by hand is DI too. And don't put an interface on everything, only on boundaries such as I/O, time and external services.",
+      "keyTerms": [
+        {
+          "term": "Dependency injection",
+          "def": "Giving an object its collaborators instead of letting it create them."
+        },
+        {
+          "term": "Dependency inversion",
+          "def": "High-level code depends on abstractions, not concrete details."
+        },
+        {
+          "term": "Fake",
+          "def": "A working lightweight implementation used in tests, such as an in-memory store."
+        }
+      ],
+      "tags": [
+        "oop",
+        "testing"
+      ]
+    },
+    {
+      "id": "int-oop-06",
+      "promptMd": "When an order is placed, the app must send a confirmation email, update analytics and award loyalty points, and product teams keep adding more reactions. Which design keeps `OrderService` from changing every time?",
+      "choices": [
+        "Builder: assemble the order and its side effects step by step",
+        "Singleton: one shared `OrderEvents` object that every team edits",
+        "Observer: subscribers register for an `OrderPlaced` event",
+        "Visitor: let each reaction visit the order's internal structure"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "With Observer (publish/subscribe), `OrderService` just announces `OrderPlaced`, and each reaction subscribes independently. New reactions are new subscribers, and the publisher doesn't know or care how many there are.",
+      "choiceNotesMd": [
+        "Builder simplifies constructing complex objects; it doesn't decouple who reacts to an event.",
+        "A shared object that every team edits is the same coupling problem in a different place.",
+        "Correct: the publisher stays closed to modification, and subscribers can be added, removed or moved to other services.",
+        "Visitor adds operations over a fixed set of element types; it's about traversing structures, not notifications."
+      ],
+      "topicMd": "**The Observer pattern** lets one object (the **subject**, or publisher) notify many dependents (**observers**, or subscribers) without knowing who they are.\n\n```\norderEvents.subscribe(\"OrderPlaced\", sendConfirmationEmail)\norderEvents.subscribe(\"OrderPlaced\", recordAnalytics)\n\n// in OrderService, after saving the order:\norderEvents.publish(\"OrderPlaced\", order)\n```\n\nIt shows up as UI event listeners, reactive streams and in-process event buses and, scaled up across services, as **pub/sub messaging** (Kafka topics, SNS, Google Pub/Sub).\n\n---\n\n**Design questions to settle:**\n\n- **Sync or async?** Synchronous observers run inside the request and can slow it down or fail it; async handlers (via a queue) isolate failures but need retries and idempotency.\n- **Failure isolation:** one observer throwing shouldn't stop the others or roll back the order.\n- **Delivery:** in-process events vanish if the process crashes right after the commit, so for anything important, publish through a transactional outbox.\n- **Memory leaks:** observers that never unsubscribe keep objects alive.\n\nObserver trades explicit control flow for decoupling: it gets harder to see everything that happens when an order is placed, so keep event names and payloads well documented.",
+      "keyTerms": [
+        {
+          "term": "Observer",
+          "def": "Subscribers are notified automatically when a subject publishes an event."
+        },
+        {
+          "term": "Publish/subscribe",
+          "def": "Publishers emit events without knowing which subscribers receive them."
+        },
+        {
+          "term": "Event",
+          "def": "A record that something happened, such as OrderPlaced."
+        }
+      ],
+      "tags": [
+        "design patterns",
+        "object-oriented design"
+      ]
+    },
+    {
+      "id": "int-test-01",
+      "promptMd": "A module's test suite reports **100% line coverage**. What does that tell you for certain?",
+      "choices": [
+        "Every branch and condition combination was tested",
+        "The module has no bugs that a unit test could catch",
+        "Every line ran at least once during the tests",
+        "Every function's results are checked by an assertion"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Line coverage only records which lines executed. A test can run code without asserting anything about its results, and running every line once doesn't cover every path or input.",
+      "choiceNotesMd": [
+        "Branch coverage is a separate, stronger metric, and even it doesn't cover every combination of conditions.",
+        "Tests can execute buggy lines and still pass if they don't check the right thing.",
+        "Correct: that's all line coverage measures, which makes it good at revealing untested code and bad at proving tested code works.",
+        "Coverage tools don't look at assertions; a test with none still counts."
+      ],
+      "topicMd": "**What coverage measures.**\n\n- **Line (statement) coverage**: each line executed at least once.\n- **Branch coverage**: each side of each decision (an `if` both true and false) taken.\n- **Condition / MC/DC coverage**: each boolean sub-condition shown to affect the outcome; required for some safety-critical software.\n- **Path coverage**: every route through the code; usually infeasible, because paths multiply.\n\nCoverage reliably tells you what **wasn't** tested. It can't tell you whether the tested code is **checked**: tests without assertions, or asserting the wrong thing, still score 100%.\n\n---\n\n**Better signals of test quality:**\n\n- **Mutation testing** (PIT, Stryker, mutmut): the tool makes small changes to your code (flip `<` to `<=`, delete a call) and reruns the tests. Mutants that survive show behaviour no test pins down.\n- Bugs that escaped to production: each one should leave a regression test behind.\n- Reviewing tests for meaningful assertions on behaviour rather than implementation details.\n\nCoverage targets (say 80%) work as a floor and as a check on new code, but chasing 100% tends to produce brittle tests of trivial code.",
+      "keyTerms": [
+        {
+          "term": "Line coverage",
+          "def": "The share of lines executed at least once by the tests."
+        },
+        {
+          "term": "Branch coverage",
+          "def": "The share of decision outcomes exercised by the tests."
+        },
+        {
+          "term": "Mutation testing",
+          "def": "Injecting small bugs to check whether the tests catch them."
+        }
+      ],
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "int-test-02",
+      "promptMd": "The orders service and the billing service each have thorough unit tests that **mock** the other. Yet releases keep breaking in production because one team changes a field the other relies on. Which kind of test targets this gap most directly?",
+      "choices": [
+        "More unit tests, with mocks that cover additional edge cases",
+        "Load tests that replay a copy of production traffic patterns",
+        "A full end-to-end UI test suite that runs every night on staging",
+        "Consumer-driven contract tests checked in each provider's CI"
+      ],
+      "answerIndex": 3,
+      "explanationMd": "Each consumer records what it expects from the provider (the requests it makes and the response fields it uses). The provider's build replays those expectations, so a breaking change fails before release instead of in production.",
+      "choiceNotesMd": [
+        "Mocks encode each team's *assumptions* about the other service; more of them don't check that the assumptions still hold.",
+        "Load tests find capacity problems, not incompatible fields.",
+        "End-to-end tests can catch it, but they're slow, flaky and run late; a failing contract points straight at the change.",
+        "Correct: contracts (for example with Pact) check both sides against the same agreed interactions, quickly and independently."
+      ],
+      "topicMd": "**Contract testing** checks that two services agree on their interface without deploying both together.\n\n**Consumer-driven contracts** (Pact is the best-known tool):\n\n1. The consumer's tests run against a mock provider and record each interaction: *for `GET /orders/42`, I expect a 200 with the fields `id`, `total` and `currency`*.\n2. The recorded contract is shared, for example through a broker.\n3. The provider's CI replays every consumer's contracts against the real provider code. If a change removed `currency`, the build fails and names the consumer that would break.\n4. A *can I deploy?* check before release confirms that the versions about to run together are compatible.\n\n---\n\n**Where it fits:**\n\n- **Unit tests with mocks** are fast but only as accurate as the mocks.\n- **Contract tests** verify the mocks' assumptions, one pair of services at a time.\n- **End-to-end tests** prove whole user journeys work, but they're slow and brittle, so keep them few.\n\nSchema-based approaches give similar protection: OpenAPI or Protobuf definitions with breaking-change checks in CI (for example `buf breaking` for Protobuf).",
+      "keyTerms": [
+        {
+          "term": "Contract test",
+          "def": "A test that checks two services agree on their interface."
+        },
+        {
+          "term": "Consumer-driven contract",
+          "def": "Expectations written by the client and verified against the provider."
+        },
+        {
+          "term": "Provider",
+          "def": "The service whose API others consume."
+        }
+      ],
+      "tags": [
+        "testing",
+        "apis"
+      ]
+    },
+    {
+      "id": "int-test-03",
+      "promptMd": "Instead of hand-picked examples, a test generates hundreds of random inputs and checks that `decode(encode(x)) == x` for each one, shrinking any failure down to a minimal case. What is this technique called?",
+      "choices": [
+        "Mutation testing",
+        "Snapshot testing",
+        "Property-based testing",
+        "Table-driven testing"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Property-based testing states a rule that must hold for *all* inputs and lets a library (Hypothesis, QuickCheck, jqwik, fast-check) generate cases and shrink failures. Round-trip properties like encode/decode are a classic use.",
+      "choiceNotesMd": [
+        "Mutation testing changes your *code* to check whether the tests notice; here the *inputs* are generated.",
+        "Snapshot tests compare output with a stored copy; they don't generate inputs.",
+        "Correct: generated inputs plus an invariant, with shrinking to a minimal counterexample.",
+        "Table-driven tests run a list of hand-written cases; the inputs here are generated."
+      ],
+      "topicMd": "**Property-based testing (PBT).** Example-based tests check specific inputs you thought of. PBT checks a **property** that should hold for every input, against many generated inputs, including edge cases you didn't think of (empty strings, huge numbers, Unicode, duplicates).\n\nWhen a case fails, the library **shrinks** it: it simplifies the input step by step while it still fails, so you get `[0, 0]` instead of a 300-element list.\n\n**Useful kinds of properties:**\n\n- **Round trip**: `decode(encode(x)) == x`, `parse(print(ast)) == ast`.\n- **Invariants**: sorting keeps the same elements and produces a non-decreasing list.\n- **Oracle**: a new optimized function agrees with a simple, obviously correct one.\n- **Idempotence**: `normalize(normalize(x)) == normalize(x)`.\n- **Metamorphic**: adding an item to a cart never lowers the total.\n\n---\n\nTools: QuickCheck (Haskell, the original), Hypothesis (Python), jqwik (Java), fast-check (JavaScript), RapidCheck (C++).\n\n**Fuzzing** is a close cousin: coverage-guided fuzzers (libFuzzer, AFL++, Go's built-in fuzzing) generate inputs aimed at reaching new code paths, usually hunting for crashes and memory errors rather than checking a stated property.",
+      "keyTerms": [
+        {
+          "term": "Property",
+          "def": "A statement that should be true for every valid input."
+        },
+        {
+          "term": "Shrinking",
+          "def": "Reducing a failing input to the smallest one that still fails."
+        },
+        {
+          "term": "Fuzzing",
+          "def": "Feeding generated inputs to a program to find crashes."
+        }
+      ],
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "int-ops-01",
+      "promptMd": "You need to rename the column `users.name` to `full_name`. The app runs as many instances updated by a **rolling deploy**, so old and new code run side by side for a while. How do you do it with no downtime?",
+      "choices": [
+        "Rename the column in one migration that runs just before the deploy",
+        "Deploy the new code first, then rename the column once it's fully rolled out",
+        "Add `full_name`, write both, backfill, switch reads, then drop `name` later",
+        "Use a short maintenance window so the rename and the deploy happen together"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "Every step has to work with both the old and the new code. The **expand/contract** pattern adds the new column, keeps both in sync, moves readers over, and removes the old column only once no running code uses it.",
+      "choiceNotesMd": [
+        "Old instances still query `name` during the rollout and start failing the moment it disappears.",
+        "The new code would query `full_name` before it exists, failing until the rename runs.",
+        "Correct: expand, migrate, contract. Each step can be deployed and rolled back on its own.",
+        "That works only by accepting downtime, which the question rules out."
+      ],
+      "topicMd": "**Zero-downtime schema changes.** During a rolling deploy (and after any rollback), old and new versions of the application run against the same database, so every migration must be compatible with **both**.\n\n**Expand/contract** (also called parallel change) for a rename:\n\n1. **Expand**: add `full_name` as a nullable column. Old code ignores it.\n2. **Dual-write**: deploy code that writes both `name` and `full_name` but still reads `name`.\n3. **Backfill**: copy existing rows in batches (avoid one giant transaction that locks the table).\n4. **Switch reads**: deploy code that reads `full_name`.\n5. **Contract**: stop writing `name`, then drop it in a later migration.\n\n---\n\n**Other rules of thumb:**\n\n- Keep schema migrations separate from code deploys, and make each step backward compatible.\n- Adding a `NOT NULL` column: add it nullable or with a default, backfill, then add the constraint.\n- Build indexes without blocking writes (`CREATE INDEX CONCURRENTLY` in Postgres).\n- Watch for migrations that take heavy locks on big tables; tools like `gh-ost` or `pt-online-schema-change` help on MySQL.\n\nIt takes more deploys, but each one is small and easy to roll back.",
+      "keyTerms": [
+        {
+          "term": "Expand/contract",
+          "def": "Changing a schema in backward-compatible steps: add, migrate, then remove."
+        },
+        {
+          "term": "Backfill",
+          "def": "Populating a new column or table from existing data."
+        },
+        {
+          "term": "Rolling deploy",
+          "def": "Replacing instances a few at a time, so versions overlap."
+        }
+      ],
+      "tags": [
+        "deployment",
+        "databases"
+      ]
+    },
+    {
+      "id": "int-ops-02",
+      "promptMd": "Your service has an availability SLO of **99.9%**, measured over a rolling 30 days. Roughly how much downtime does that allow per 30-day window?",
+      "choices": [
+        "About 4.3 minutes",
+        "About 43 minutes",
+        "About 7.2 hours",
+        "About 8.8 hours"
+      ],
+      "answerIndex": 1,
+      "explanationMd": "30 days is 43,200 minutes, and 0.1% of that is about 43 minutes. That allowance is the **error budget**: what you can spend on incidents, risky deploys and maintenance before breaching the SLO.",
+      "choiceNotesMd": [
+        "That's 99.99% (four nines) over 30 days.",
+        "Correct: 43,200 min × 0.001 ≈ 43 min.",
+        "That's 99% over 30 days.",
+        "That's 99.9% over a whole **year**, not 30 days."
+      ],
+      "topicMd": "**SLIs, SLOs and error budgets.**\n\n- **SLI** (indicator): a measured ratio of good events, such as the share of requests that succeed in under 300 ms.\n- **SLO** (objective): the target for that SLI over a window, such as 99.9% over 30 days.\n- **SLA** (agreement): a contract with customers, with penalties; usually looser than the internal SLO.\n\n**Downtime per 30 days:** 99% ≈ 7.2 h, 99.9% ≈ 43 min, 99.95% ≈ 22 min, 99.99% ≈ 4.3 min. Each extra nine costs far more engineering.\n\n---\n\nThe **error budget** is 100% minus the SLO, and it turns reliability into a shared decision:\n\n- Budget left: ship features and take reasonable risks.\n- Budget burning fast: slow down releases and prioritize reliability work.\n\n**Alert on burn rate**, not on single errors: page when the budget is being consumed, say, 14 times faster than sustainable over the last hour (it would be gone in about two days), and open a ticket for slower burns.\n\nRemember that **dependencies multiply**: a service that needs five 99.9% dependencies in series can't promise much better than about 99.5% itself.",
+      "keyTerms": [
+        {
+          "term": "SLO",
+          "def": "An internal target for a reliability measure over a time window."
+        },
+        {
+          "term": "Error budget",
+          "def": "The amount of unreliability an SLO allows."
+        },
+        {
+          "term": "Burn rate",
+          "def": "How fast the error budget is being consumed relative to plan."
+        }
+      ],
+      "tags": [
+        "reliability",
+        "observability"
+      ]
+    },
+    {
+      "id": "int-ops-03",
+      "promptMd": "Your service's **p99 latency doubled** and its error rate tripled within minutes of a deploy that went out 20 minutes ago. Customers are affected. What's the best first move?",
+      "choices": [
+        "Profile the new version in production to find the slow code path",
+        "Scale out to twice as many instances to absorb the extra latency",
+        "Roll back to the previous version, then investigate the cause",
+        "Write a hotfix for the most likely cause and deploy it right away"
+      ],
+      "answerIndex": 2,
+      "explanationMd": "During an incident, **mitigate first**: the recent deploy is the prime suspect, and rolling back is fast, well rehearsed and reversible. Root-causing happens once customers are no longer affected.",
+      "choiceNotesMd": [
+        "Useful later, but it leaves customers suffering while you investigate.",
+        "Extra capacity rarely fixes a code regression, and it can amplify it (more load on a shared database, for example).",
+        "Correct: restore service, confirm the metrics recover, then debug the bad version off the critical path.",
+        "A rushed fix under pressure is untested and may make things worse; roll back, then fix properly."
+      ],
+      "topicMd": "**Incident response basics.**\n\n1. **Detect and declare**: alerts fire on symptoms (errors, latency, SLO burn). Declare an incident and name an **incident commander** who coordinates, rather than everyone debugging separately.\n2. **Mitigate first**: roll back the recent change, turn off the feature flag, shift traffic away from a bad region, or shed load. Restoring service beats understanding the bug.\n3. **Communicate**: regular status updates to stakeholders and customers.\n4. **Resolve** the root cause once things are stable.\n5. **Blameless postmortem**: timeline, impact, contributing factors, and action items with owners. Focus on what made the failure possible, not on who pushed the button.\n\n---\n\n**Make rollback cheap before you need it:**\n\n- Keep deploys small and frequent, so the bad change is easy to find.\n- Use canary releases with automatic rollback on SLO regressions.\n- Ship risky features behind **feature flags**, so they can be turned off without a deploy.\n- Keep database migrations backward compatible; a migration that drops data can make rollback impossible.\n\nUseful metrics for the process itself are **time to detect** and **time to mitigate**.",
+      "keyTerms": [
+        {
+          "term": "Mitigation",
+          "def": "Stopping the customer impact, before the root cause is known."
+        },
+        {
+          "term": "Incident commander",
+          "def": "The person coordinating the response during an incident."
+        },
+        {
+          "term": "Blameless postmortem",
+          "def": "A review that looks at system causes rather than individual fault."
+        }
+      ],
+      "tags": [
+        "reliability",
+        "deployment"
+      ]
+    }
+  ]
+}
