@@ -1,18 +1,12 @@
 # dailylearncode
 
-A daily coding-interview practice game that runs entirely in the browser. Each day has five short stages, scored out of
-**20**:
+A daily coding-interview practice game that runs/compiles all in the browser. Each day has five short stages with coding easy-medium-hard coding and SWE knowledge practice.
 
-| # | Stage | Points |
-|---|---|---|
-| 1 | Starter: algorithms quiz (4 questions) | 4 × 1 |
-| 2 | Easy coding problem | 4 |
-| 3 | Medium coding problem | 4 |
-| 4 | Hard coding problem | 4 |
-| 5 | Software-engineering quiz (4 questions) | 4 × 1 |
+Keep your code sharp, beat the coderot of vibecode habits.
 
-Solve the coding problems in **Python 3, Java or C++**. Your code compiles and runs **in your own browser**: no
-server, no account, nothing to install.
+Solve the coding problems in **Python 3, Java or C++**.
+
+Try it: https://learn.kurolight.dev
 
 | Daily quiz | Coding | Learn |
 |---|---|---|
@@ -34,13 +28,26 @@ server, no account, nothing to install.
 - **Stats:** scores, a 🔥 streak, per-topic accuracy, an archive of past sets and the mistakes worth reviewing.
 - **Quality of life:**
   - A syntax cheat sheet beside the editor
+  - Mobile friendly
   - Language-aware quiz questions
   - Light and dark themes
   - A shortcut-key bar above the phone keyboard
-  - A shareable, spoiler-free emoji summary
+  - A shareable, spoiler-free summary
   - Export and import of your progress, plus optional sync to the player's own Google Drive
 
 <p align="center"><img src="docs/screenshots/mobile-learn.png" alt="The Learn index on a phone" width="280"></p>
+
+## Daily format:
+| # | Stage | Points |
+|---|---|---|
+| 1 | Starter: algorithms quiz (4 questions) | 4 × 1 |
+| 2 | Easy coding problem | 4 |
+| 3 | Medium coding problem | 4 |
+| 4 | Hard coding problem | 4 |
+| 5 | Software-engineering quiz (4 questions) | 4 × 1 |
+
+Your code compiles and runs **in your own browser**: no
+server, no account, nothing to install.
 
 ## Run it locally
 
